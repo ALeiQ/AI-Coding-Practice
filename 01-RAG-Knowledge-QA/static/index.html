@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG 知识库问答</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .typing-dot { animation: blink 1.4s infinite both; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
+        html, body { height: 100%; margin: 0; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-full flex flex-col">
+
+<div x-data="app()" x-init="init()" class="flex flex-col h-full">
+
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">R</div>
+            <h1 class="text-lg font-semibold">RAG 知识库问答</h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm text-gray-400">
+            <span x-text="statusText"></span>
+            <span class="text-gray-600">|</span>
+            <span x-text="configText"></span>
+        </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <div class="bg-gray-800 border-b border-gray-700 px-6 flex gap-1 shrink-0">
+        <template x-for="tab in ['chat', 'ingest', 'status']" :key="tab">
+            <button
+                @click="activeTab = tab"
+                :class="activeTab === tab ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'"
+                class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+                x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : '📊 状态'"
+            ></button>
+        </template>
+    </div>
+
+    <!-- Chat Tab -->
+    <div x-show="activeTab === 'chat'" class="flex-1 flex flex-col overflow-hidden">
+        <!-- Messages -->
+        <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" x-ref="chatBox">
+            <template x-if="messages.length === 0">
+                <div class="flex flex-col items-center justify-center h-full text-gray-500">
+                    <div class="text-4xl mb-4">🤖</div>
+                    <p class="text-lg">向知识库提问</p>
+                    <p class="text-sm mt-1">基于你的文档回答问题</p>
+                </div>
+            </template>
+            <template x-for="(msg, i) in messages" :key="i">
+                <div class="fade-in" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                    <div :class="msg.role === 'user'
+                        ? 'bg-blue-600 text-white rounded-2xl rounded-br-md max-w-[70%]'
+                        : 'bg-gray-700 text-gray-100 rounded-2xl rounded-bl-md max-w-[80%]'"
+                        class="px-4 py-3">
+                        <div class="whitespace-pre-wrap text-sm leading-relaxed" x-html="renderMarkdown(msg.content)"></div>
+                        <template x-if="msg.sources && msg.sources.length > 0">
+                            <div class="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
+                                <span>📎 来源: </span>
+                                <template x-for="s in msg.sources" :key="s">
+                                    <span class="inline-block bg-gray-600 rounded px-1.5 py-0.5 mr-1" x-text="s"></span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <template x-if="loading">
+                <div class="flex justify-start fade-in">
+                    <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3">
+                        <div class="flex gap-1">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Input -->
+        <div class="border-t border-gray-700 px-6 py-4 bg-gray-800 shrink-0">
+            <form @submit.prevent="sendQuery()" class="flex gap-3">
+                <input
+                    x-model="question"
+                    type="text"
+                    placeholder="输入你的问题..."
+                    :disabled="loading"
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder-gray-400"
+                >
+                <button
+                    type="submit"
+                    :disabled="loading || !question.trim()"
+                    class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors"
+                >
+                    发送
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Ingest Tab -->
+    <div x-show="activeTab === 'ingest'" class="flex-1 overflow-y-auto px-6 py-6">
+        <div class="max-w-2xl mx-auto space-y-6">
+            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4">导入文档到知识库</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">文档路径</label>
+                        <input
+                            x-model="ingestPath"
+                            type="text"
+                            placeholder="data"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-400"
+                        >
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input x-model="ingestRecreate" type="checkbox" id="recreate" class="rounded">
+                        <label for="recreate" class="text-sm text-gray-400">重建索引（清空现有数据）</label>
+                    </div>
+                    <button
+                        @click="doIngest()"
+                        :disabled="ingestLoading"
+                        class="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <span x-show="!ingestLoading">开始导入</span>
+                        <span x-show="ingestLoading">导入中...</span>
+                    </button>
+                </div>
+            </div>
+
+            <template x-if="ingestResult">
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 fade-in">
+                    <h3 class="font-medium mb-2" :class="ingestResult.status === 'ok' ? 'text-green-400' : 'text-red-400'">
+                        <span x-text="ingestResult.status === 'ok' ? '✅ 导入成功' : '❌ 导入失败'"></span>
+                    </h3>
+                    <template x-if="ingestResult.status === 'ok'">
+                        <div class="text-sm text-gray-400 space-y-1">
+                            <p>文档数: <span class="text-white" x-text="ingestResult.documents"></span></p>
+                            <p>分块数: <span class="text-white" x-text="ingestResult.chunks"></span></p>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- File List -->
+            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4">已导入文件</h2>
+                <div class="text-sm text-gray-400 mb-2">
+                    共 <span class="text-white" x-text="fileList.length"></span> 个文件
+                </div>
+                <div class="max-h-64 overflow-y-auto space-y-1">
+                    <template x-for="f in fileList" :key="f">
+                        <div class="text-xs text-gray-500 font-mono py-0.5" x-text="f"></div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Tab -->
+    <div x-show="activeTab === 'status'" class="flex-1 overflow-y-auto px-6 py-6">
+        <div class="max-w-2xl mx-auto space-y-6">
+            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4">知识库状态</h2>
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">集合名称</span>
+                        <span x-text="statusInfo.collection || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">向量数量</span>
+                        <span x-text="statusInfo.points_count ?? '未创建'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">状态</span>
+                        <span :class="statusInfo.status === 'green' ? 'text-green-400' : 'text-gray-400'" x-text="statusInfo.status || '-'"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4">配置信息</h2>
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">Embedding 模型</span>
+                        <span x-text="configInfo.embedding_model || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">LLM 模型</span>
+                        <span x-text="configInfo.llm_model || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">Chunk 大小</span>
+                        <span x-text="configInfo.chunk_size || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">Chunk 重叠</span>
+                        <span x-text="configInfo.chunk_overlap || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-gray-700">
+                        <span class="text-gray-400">Top K</span>
+                        <span x-text="configInfo.top_k || '-'"></span>
+                    </div>
+                    <div class="flex justify-between py-2">
+                        <span class="text-gray-400">Qdrant</span>
+                        <span class="font-mono text-xs" x-text="configInfo.qdrant_url || '-'"></span>
+                    </div>
+                </div>
+            </div>
+
+            <button @click="loadStatus(); loadConfig()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+                🔄 刷新
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function app() {
+    return {
+        activeTab: 'chat',
+        question: '',
+        messages: [],
+        loading: false,
+
+        ingestPath: 'data',
+        ingestRecreate: false,
+        ingestLoading: false,
+        ingestResult: null,
+        fileList: [],
+
+        statusInfo: {},
+        configInfo: {},
+
+        get statusText() {
+            const n = this.statusInfo.points_count;
+            return n ? `${n} 条记录` : '';
+        },
+        get configText() {
+            return this.configInfo.llm_model || '';
+        },
+
+        async init() {
+            await Promise.all([this.loadStatus(), this.loadConfig(), this.loadFiles()]);
+        },
+
+        async sendQuery() {
+            const q = this.question.trim();
+            if (!q || this.loading) return;
+
+            this.messages.push({ role: 'user', content: q });
+            this.question = '';
+            this.loading = true;
+
+            this.messages.push({ role: 'assistant', content: '', sources: [] });
+            const idx = this.messages.length - 1;
+
+            try {
+                const res = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: q }),
+                });
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const event = JSON.parse(line.slice(6));
+                            if (event.type === 'chunk') {
+                                this.messages[idx].content += event.text;
+                            } else if (event.type === 'done') {
+                                this.messages[idx].sources = event.sources || [];
+                                if (event.answer && !this.messages[idx].content) {
+                                    this.messages[idx].content = event.answer;
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+            } catch (e) {
+                this.messages[idx].content = '请求失败: ' + e.message;
+            }
+
+            this.loading = false;
+            this.$nextTick(() => {
+                const box = this.$refs.chatBox;
+                if (box) box.scrollTop = box.scrollHeight;
+            });
+        },
+
+        async doIngest() {
+            this.ingestLoading = true;
+            this.ingestResult = null;
+            try {
+                const res = await fetch('/api/ingest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: this.ingestPath, recreate: this.ingestRecreate }),
+                });
+                this.ingestResult = await res.json();
+                await this.loadStatus();
+                await this.loadFiles();
+            } catch (e) {
+                this.ingestResult = { status: 'error', error: e.message };
+            }
+            this.ingestLoading = false;
+        },
+
+        async loadStatus() {
+            try {
+                const res = await fetch('/api/status');
+                this.statusInfo = await res.json();
+            } catch {}
+        },
+
+        async loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                this.configInfo = await res.json();
+            } catch {}
+        },
+
+        async loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                this.fileList = data.files || [];
+            } catch {}
+        },
+
+        renderMarkdown(text) {
+            if (!text) return '';
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code class="bg-gray-600 px-1 rounded text-xs">$1</code>')
+                .replace(/\n/g, '<br>');
+            return html;
+        },
+    }
+}
+</script>
+
+</body>
+</html>

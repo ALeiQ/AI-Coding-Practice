@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import ollama
+import requests as _requests
 
 from src.config import settings
+
+OLLAMA_BASE = settings.ollama_base_url
+
+
+def _ollama_post(endpoint: str, payload: dict) -> dict:
+    resp = _requests.post(f"{OLLAMA_BASE}{endpoint}", json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
 
 
 @dataclass
@@ -18,11 +26,11 @@ class OllamaDenseEmbeddings:
         self.model_name = model_name or settings.dense_embedding_model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        result = ollama.embed(model=self.model_name, input=texts)
+        result = _ollama_post("/api/embed", {"model": self.model_name, "input": texts})
         return result["embeddings"]
 
     def embed_query(self, text: str) -> list[float]:
-        result = ollama.embed(model=self.model_name, input=[text])
+        result = _ollama_post("/api/embed", {"model": self.model_name, "input": [text]})
         return result["embeddings"][0]
 
 
