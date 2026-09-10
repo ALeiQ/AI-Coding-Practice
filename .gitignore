@@ -1,0 +1,33 @@
+# Environment
+.env
+env
+
+# Python
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Caches
+**/.pytest_cache/
+**/.ruff_cache/
+
+# Data
+**/qdrant_data/
+**/data/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
