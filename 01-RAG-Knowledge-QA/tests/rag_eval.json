@@ -1,0 +1,421 @@
+[
+  {
+    "id": 1,
+    "question": "郭建美的身份证号是多少？",
+    "expected_keywords": [
+      "370627197110280241"
+    ],
+    "expected_source": "身份证.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 2,
+    "question": "刘为民的常驻地在哪里？",
+    "expected_keywords": [
+      "广场街",
+      "莱阳"
+    ],
+    "expected_source": "身份证.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 3,
+    "question": "栀子花多久浇一次水？",
+    "expected_keywords": [
+      "1-2天"
+    ],
+    "expected_source": "植物浇水",
+    "category": "基础查询"
+  },
+  {
+    "id": 4,
+    "question": "发财树的浇水频率是多少？",
+    "expected_keywords": [
+      "7-15天"
+    ],
+    "expected_source": "植物浇水",
+    "category": "基础查询"
+  },
+  {
+    "id": 5,
+    "question": "射箭时手肘应该怎么做？",
+    "expected_keywords": [
+      "向内"
+    ],
+    "expected_source": "射箭技巧.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 6,
+    "question": "射箭瞄准调整量是多少？",
+    "expected_keywords": [
+      "上下4",
+      "左右2"
+    ],
+    "expected_source": "射箭技巧.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 7,
+    "question": "在这个世界观设定中，人死后会怎样？",
+    "expected_keywords": [
+      "平行宇宙"
+    ],
+    "expected_source": "世界观.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 8,
+    "question": "Weightless失重可以降低多少焦虑？",
+    "expected_keywords": [
+      "65%"
+    ],
+    "expected_source": "五大法则.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 9,
+    "question": "莫扎特K448第2章有什么效果？",
+    "expected_keywords": [
+      "智商"
+    ],
+    "expected_source": "五大法则.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 10,
+    "question": "GSX摩托车跑山压弯建议换什么轮胎？",
+    "expected_keywords": [
+      "米其林",
+      "Power RS"
+    ],
+    "expected_source": "GSX",
+    "category": "基础查询"
+  },
+  {
+    "id": 11,
+    "question": "GSX综合跑山压弯操控建议用什么轮胎？",
+    "expected_keywords": [
+      "天使ST"
+    ],
+    "expected_source": "GSX",
+    "category": "基础查询"
+  },
+  {
+    "id": 12,
+    "question": "摩托车点检发现了什么问题？",
+    "expected_keywords": [
+      "慢撒气",
+      "生锈"
+    ],
+    "expected_source": "摩托点检",
+    "category": "基础查询"
+  },
+  {
+    "id": 13,
+    "question": "家庭聚会的主题是什么？",
+    "expected_keywords": [
+      "奔向更美好的明天"
+    ],
+    "expected_source": "家庭聚会",
+    "category": "基础查询"
+  },
+  {
+    "id": 14,
+    "question": "OKR的使命是什么？",
+    "expected_keywords": [
+      "人机交互"
+    ],
+    "expected_source": "OKR.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 15,
+    "question": "刘子祥是哪年毕业的？",
+    "expected_keywords": [
+      "2018"
+    ],
+    "expected_source": "刘子祥",
+    "category": "基础查询"
+  },
+  {
+    "id": 16,
+    "question": "刘子祥毕业于哪所大学？",
+    "expected_keywords": [
+      "山东理工大学"
+    ],
+    "expected_source": "刘子祥",
+    "category": "基础查询"
+  },
+  {
+    "id": 17,
+    "question": "收集朋友语录计划要收集哪些内容？",
+    "expected_keywords": [
+      "印象",
+      "祝福"
+    ],
+    "expected_source": "收集朋友语录计划.md",
+    "category": "基础查询"
+  },
+  {
+    "id": 18,
+    "question": "吉他马丁尼是什么型号和尺寸？",
+    "expected_keywords": [
+      "Prelude",
+      "39"
+    ],
+    "expected_source": "马丁尼",
+    "category": "基础查询"
+  },
+  {
+    "id": 19,
+    "question": "RAG的核心优势是什么？",
+    "expected_keywords": [
+      "幻觉",
+      "可追溯"
+    ],
+    "expected_source": "rag_intro.txt",
+    "category": "基础查询"
+  },
+  {
+    "id": 20,
+    "question": "旅行计划中有哪些目的地？",
+    "expected_keywords": [
+      "重庆",
+      "泸沽湖"
+    ],
+    "expected_source": "重庆",
+    "category": "基础查询"
+  },
+  {
+    "id": 21,
+    "question": "郭建美身份证",
+    "expected_keywords": [
+      "370627197110280241"
+    ],
+    "expected_source": "身份证.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 22,
+    "question": "查一下郭建美的身份证",
+    "expected_keywords": [
+      "370627197110280241"
+    ],
+    "expected_source": "身份证.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 23,
+    "question": "郭建美的身份信息",
+    "expected_keywords": [
+      "370627197110280241"
+    ],
+    "expected_source": "身份证.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 24,
+    "question": "刘为民身份证号码",
+    "expected_keywords": [
+      "370627196808200210"
+    ],
+    "expected_source": "身份证.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 25,
+    "question": "帮我查一下刘为民的身份证号",
+    "expected_keywords": [
+      "370627196808200210"
+    ],
+    "expected_source": "身份证.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 26,
+    "question": "栀子花几天浇一次",
+    "expected_keywords": [
+      "1-2天"
+    ],
+    "expected_source": "植物浇水",
+    "category": "变体查询"
+  },
+  {
+    "id": 27,
+    "question": "发财树要多久浇水",
+    "expected_keywords": [
+      "7-15天"
+    ],
+    "expected_source": "植物浇水",
+    "category": "变体查询"
+  },
+  {
+    "id": 28,
+    "question": "绿萝浇水间隔",
+    "expected_keywords": [
+      "5-7天"
+    ],
+    "expected_source": "植物浇水",
+    "category": "变体查询"
+  },
+  {
+    "id": 29,
+    "question": "射箭时候手肘怎么放",
+    "expected_keywords": [
+      "向内"
+    ],
+    "expected_source": "射箭技巧.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 30,
+    "question": "失重能降低多少焦虑",
+    "expected_keywords": [
+      "65%"
+    ],
+    "expected_source": "五大法则.md",
+    "category": "变体查询"
+  },
+  {
+    "id": 31,
+    "question": "GSX轮胎推荐",
+    "expected_keywords": [
+      "米其林"
+    ],
+    "expected_source": "GSX",
+    "category": "变体查询"
+  },
+  {
+    "id": 32,
+    "question": "摩托车前轮胎怎么了",
+    "expected_keywords": [
+      "慢撒气"
+    ],
+    "expected_source": "摩托点检",
+    "category": "变体查询"
+  },
+  {
+    "id": 33,
+    "question": "家庭聚会要做什么",
+    "expected_keywords": [
+      "奔向更美好的明天"
+    ],
+    "expected_source": "家庭聚会",
+    "category": "变体查询"
+  },
+  {
+    "id": 34,
+    "question": "刘子祥在哪上的学",
+    "expected_keywords": [
+      "山东理工大学"
+    ],
+    "expected_source": "刘子祥",
+    "category": "变体查询"
+  },
+  {
+    "id": 35,
+    "question": "范思哲云淡风轻是什么",
+    "expected_keywords": [
+      "云淡风轻",
+      "爱罗斯"
+    ],
+    "expected_source": "范思哲",
+    "category": "变体查询"
+  },
+  {
+    "id": 36,
+    "question": "郭建美出生日期",
+    "expected_keywords": [
+      "1971"
+    ],
+    "expected_source": "身份证.md",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 37,
+    "question": "刘子祥的身份证号是多少？",
+    "expected_keywords": [
+      "370682199605128819"
+    ],
+    "expected_source": "刘子祥",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 38,
+    "question": "隋亨特的身份证号",
+    "expected_keywords": [
+      "370682199003310410"
+    ],
+    "expected_source": "刘子祥",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 39,
+    "question": "五大法则中开源和节流哪个重要？",
+    "expected_keywords": [
+      "开源"
+    ],
+    "expected_source": "五大法则.md",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 40,
+    "question": "人生存的五大法则有哪些？",
+    "expected_keywords": [
+      "Weightless",
+      "莫扎特"
+    ],
+    "expected_source": "五大法则.md",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 41,
+    "question": "面试准备需要覆盖哪些技术栈？",
+    "expected_keywords": [
+      "Python",
+      "C++"
+    ],
+    "expected_source": "Interview Todo.md",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 42,
+    "question": "刘子祥在哪些公司工作过？",
+    "expected_keywords": [
+      "百度",
+      "度秘"
+    ],
+    "expected_source": "刘子祥",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 43,
+    "question": "刘子祥的兴趣爱好有哪些？",
+    "expected_keywords": [
+      "摩旅",
+      "滑雪"
+    ],
+    "expected_source": "刘子祥",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 44,
+    "question": "宠物从小要培养哪些技能？",
+    "expected_keywords": [
+      "响片",
+      "牵引绳"
+    ],
+    "expected_source": "从小培养.md",
+    "category": "跨文件查询"
+  },
+  {
+    "id": 45,
+    "question": "消极情绪解决方法有哪些？",
+    "expected_keywords": [
+      "333呼吸法"
+    ],
+    "expected_source": "消极情绪解决.md",
+    "category": "跨文件查询"
+  }
+]

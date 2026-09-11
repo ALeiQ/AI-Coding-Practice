@@ -48,14 +48,16 @@ class LocalSparseEmbeddings:
 
     def embed_documents(self, texts: list[str]) -> list[SparseEmbeddingResult]:
         model = self._get_model()
+        results = list(model.embed(texts))
         return [
             SparseEmbeddingResult(indices=s.indices.tolist(), values=s.values.tolist())
-            for s in model.embed(texts)
+            for s in results
         ]
 
     def embed_query(self, text: str) -> SparseEmbeddingResult:
         model = self._get_model()
-        result = model.embed([text])[0]
+        results = list(model.embed([text]))
+        result = results[0]
         return SparseEmbeddingResult(
             indices=result.indices.tolist(), values=result.values.tolist()
         )

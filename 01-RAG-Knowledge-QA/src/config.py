@@ -6,8 +6,10 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "knowledge_base"
+    import_db_path: str = "./qdrant_data/imports.db"
 
     dense_embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
 
     ollama_model: str = "qwen2.5"
     ollama_base_url: str = "http://localhost:11434"

@@ -11,9 +11,10 @@ SYSTEM_PROMPT = """你是一个知识库问答助手。基于以下检索到的�
 
 规则:
 1. 只基于提供的文档回答，不要编造信息
-2. 如果文档中没有相关信息，回答"根据现有文档，我无法回答这个问题"
-3. 引用来源: 在回答中标注 [来源: 文件名]
-4. 保持回答简洁准确"""
+2. 文档中的具体数字、数值、编号、名称、列表项必须原样引用，不得省略、不得改写、不得概括
+3. 如果文档中确实没有相关信息，才回答"根据现有文档，我无法回答这个问题"
+4. 引用来源: 在回答中标注 [来源: 文件名]
+5. 回答简洁准确，先直接给出答案"""
 
 OLLAMA_BASE = settings.ollama_base_url
 
@@ -40,6 +41,17 @@ def _make_messages(context: str, question: str) -> list[dict]:
     ]
 
 
+def _chunk_details(chunks: list[RetrievedChunk]) -> list[dict]:
+    return [
+        {
+            "filename": c.metadata.get("filename", "unknown"),
+            "text": c.text,
+            "score": round(c.score, 4),
+        }
+        for c in chunks
+    ]
+
+
 def answer_question(question: str, top_k: int | None = None) -> dict:
     chunks = search(question, top_k=top_k or settings.top_k)
     if not chunks:
@@ -47,6 +59,7 @@ def answer_question(question: str, top_k: int | None = None) -> dict:
             "answer": "知识库中没有找到相关文档。",
             "sources": [],
             "chunks_used": 0,
+            "retrieved": [],
         }
 
     sources, context = _build_context(chunks)
@@ -68,6 +81,7 @@ def answer_question(question: str, top_k: int | None = None) -> dict:
         "answer": data["message"]["content"],
         "sources": sources,
         "chunks_used": len(chunks),
+        "retrieved": _chunk_details(chunks),
     }
 
 
@@ -81,6 +95,7 @@ def answer_question_stream(
             "answer": "知识库中没有找到相关文档。",
             "sources": [],
             "chunks_used": 0,
+            "retrieved": [],
         }
         return
 
@@ -112,4 +127,5 @@ def answer_question_stream(
         "answer": full_answer,
         "sources": sources,
         "chunks_used": len(chunks),
+        "retrieved": _chunk_details(chunks),
     }

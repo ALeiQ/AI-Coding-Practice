@@ -15,6 +15,8 @@
         .typing-dot:nth-child(3) { animation-delay: 0.4s; }
         @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
         html, body { height: 100%; margin: 0; }
+        .hl { background: #facc15; color: #1f2937; padding: 0 1px; border-radius: 2px; }
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 40; display: flex; align-items: center; justify-content: center; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 h-full flex flex-col">
@@ -36,12 +38,12 @@
 
     <!-- Tab Bar -->
     <div class="bg-gray-800 border-b border-gray-700 px-6 flex gap-1 shrink-0">
-        <template x-for="tab in ['chat', 'ingest', 'status']" :key="tab">
+        <template x-for="tab in ['chat', 'ingest', 'imports', 'status']" :key="tab">
             <button
-                @click="activeTab = tab"
+                @click="setActiveTab(tab)"
                 :class="activeTab === tab ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'"
                 class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-                x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : '📊 状态'"
+                x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : tab === 'imports' ? '📚 导入记录' : '📊 状态'"
             ></button>
         </template>
     </div>
@@ -67,8 +69,13 @@
                         <template x-if="msg.sources && msg.sources.length > 0">
                             <div class="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
                                 <span>📎 来源: </span>
-                                <template x-for="s in msg.sources" :key="s">
-                                    <span class="inline-block bg-gray-600 rounded px-1.5 py-0.5 mr-1" x-text="s"></span>
+                                <template x-for="(s, si) in msg.sources" :key="si">
+                                    <button
+                                        @click="msg.retrieved && msg.retrieved[si] ? openSource(msg, si) : null"
+                                        :class="msg.retrieved && msg.retrieved[si] ? 'hover:bg-blue-600 cursor-pointer' : 'cursor-default'"
+                                        class="inline-block bg-gray-600 rounded px-1.5 py-0.5 mr-1 transition-colors"
+                                        x-text="s"
+                                    ></button>
                                 </template>
                             </div>
                         </template>
@@ -113,30 +120,105 @@
     <div x-show="activeTab === 'ingest'" class="flex-1 overflow-y-auto px-6 py-6">
         <div class="max-w-2xl mx-auto space-y-6">
             <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
-                <h2 class="text-lg font-semibold mb-4">导入文档到知识库</h2>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">文档路径</label>
-                        <input
-                            x-model="ingestPath"
-                            type="text"
-                            placeholder="data"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-400"
-                        >
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <input x-model="ingestRecreate" type="checkbox" id="recreate" class="rounded">
-                        <label for="recreate" class="text-sm text-gray-400">重建索引（清空现有数据）</label>
-                    </div>
-                    <button
-                        @click="doIngest()"
-                        :disabled="ingestLoading"
-                        class="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
-                    >
-                        <span x-show="!ingestLoading">开始导入</span>
-                        <span x-show="ingestLoading">导入中...</span>
-                    </button>
+                <div class="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-700 text-sm">
+                    <span class="text-gray-400">知识库集合</span>
+                    <span class="font-mono text-white bg-gray-700 rounded px-2 py-1" x-text="currentCollection"></span>
+                    <select :value="currentCollection" @change="switchCollection($event.target.value)"
+                        :disabled="collectionSwitching"
+                            class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500">
+                        <template x-for="c in collections" :key="c">
+                            <option :value="c" x-text="c"></option>
+                        </template>
+                    </select>
+                    <input x-model="newCollectionName" type="text" placeholder="新建集合名"
+                           class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs w-36 focus:outline-none focus:border-blue-500 placeholder-gray-500">
+                    <button @click="createCollection()" :disabled="collectionSwitching || !newCollectionName.trim()"
+                            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded px-3 py-1.5 text-xs transition-colors">新建并切换</button>
                 </div>
+
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-lg font-semibold">文件清单与批量导入</h2>
+                    <span class="text-sm text-gray-400">已导入 <span class="text-white" x-text="fsSummary.imported"></span> / <span class="text-white" x-text="fsSummary.total"></span></span>
+                </div>
+
+                <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                    <div class="relative flex items-center">
+                        <span class="absolute left-2 text-gray-500">🔍</span>
+                        <input x-model="fsSearch" @input="rebuildTree()" type="text" placeholder="搜索文件/目录…"
+                               class="bg-gray-700 border border-gray-600 rounded pl-7 pr-6 py-1.5 text-xs w-56 focus:outline-none focus:border-blue-500 placeholder-gray-500">
+                        <button x-show="fsSearch" @click="fsSearch = ''; rebuildTree()"
+                                class="absolute right-1.5 text-gray-500 hover:text-white text-sm leading-none px-1">✕</button>
+                    </div>
+                    <button @click="selectUnimported()" class="bg-gray-700 hover:bg-gray-600 text-gray-200 rounded px-3 py-1.5 transition-colors">全选未导入</button>
+                    <button @click="clearSelection()" class="bg-gray-700 hover:bg-gray-600 text-gray-200 rounded px-3 py-1.5 transition-colors">清空选择</button>
+                    <div class="flex flex-wrap items-center gap-4 ml-auto">
+                        <label class="flex items-center gap-1.5 text-gray-400"><input type="checkbox" x-model="ingestRecreate" class="rounded">重建索引</label>
+                        <label class="flex items-center gap-1.5 text-gray-400"><input type="checkbox" x-model="ingestDeleteMissing" class="rounded">删除已移除文件的索引</label>
+                    </div>
+                </div>
+
+                <div class="overflow-y-auto border border-gray-700 rounded-lg mb-3"
+                     :style="'height:' + fsTreeHeight + 'px'">
+                    <div class="text-xs text-gray-500 font-mono pl-3 py-1.5 border-b border-gray-700/60 bg-gray-900/40">📁 <span class="text-gray-300">data/</span></div>
+                    <template x-if="fsTreeRows.length === 0">
+                        <div class="text-xs text-gray-500 py-4 text-center" x-text="fsSearch ? '未找到匹配项' : 'data 目录为空'"></div>
+                    </template>
+                    <template x-for="row in fsTreeRows" :key="row.rel">
+                        <div class="flex items-center gap-2 py-1 px-1 hover:bg-gray-700/40 text-xs"
+                             :style="'padding-left:' + (row.depth * 16 + 10) + 'px'">
+                            <button x-show="row.isDir" @click="toggleExpand(row.rel)" class="w-4 shrink-0 text-center text-gray-500 hover:text-white">
+                                <span x-text="row.expanded ? '▾' : '▸'"></span>
+                            </button>
+                            <span x-show="!row.isDir" class="w-4 shrink-0"></span>
+
+                            <template x-if="row.isDir">
+                                <span class="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5 rounded border border-gray-500 cursor-pointer select-none"
+                                      :class="dirSelState(row.rel) === 'all' ? 'bg-blue-600 border-blue-600' : ''"
+                                      @click="toggleDir(row.rel)">
+                                    <span x-show="dirSelState(row.rel) === 'all'" class="text-white text-[10px] leading-none">✓</span>
+                                    <span x-show="dirSelState(row.rel) === 'some'" class="w-1.5 h-0.5 bg-gray-400"></span>
+                                </span>
+                            </template>
+                            <template x-if="!row.isDir">
+                                <input type="checkbox" class="shrink-0 rounded" :checked="!!selected[row.rel]" @click="toggleFile(row.rel)">
+                            </template>
+
+                            <span x-show="row.isDir ? (row.imported < row.total) : !row.file.imported"
+                                  class="w-2 h-2 shrink-0 rounded-full bg-yellow-400" title="未导入"></span>
+                            <span x-show="row.isDir ? (row.imported === row.total && row.total > 0) : row.file.imported"
+                                  class="w-2 h-2 shrink-0 rounded-full bg-green-500" title="已导入"></span>
+                            <span x-show="row.isDir" class="w-2 shrink-0"></span>
+
+                            <span class="text-gray-200 truncate" :class="{'font-medium text-gray-100 cursor-pointer hover:underline': row.isDir, 'cursor-pointer hover:underline': !row.isDir}"
+                                      @click="!row.isDir && viewFile(row.rel)" x-text="row.name"></span>
+                            <span class="ml-auto shrink-0 text-gray-600 pl-2"
+                                  x-text="row.isDir ? (row.imported + '/' + row.total) : (row.file.imported ? (row.file.chunks + ' 块') : '')"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="mb-3 flex justify-center py-1 cursor-ns-resize select-none text-gray-600 hover:text-gray-300 -mt-1"
+                     title="拖动调整高度"
+                     @mousedown="startFsResize($event)"
+                     @mousemove.window="fsResizeDrag($event)"
+                     @mouseup.window="fsResizeEnd()">
+                    <span class="h-1 w-10 rounded-full bg-gray-600"></span>
+                </div>
+
+                <template x-if="missingFiles.length > 0">
+                    <div class="mb-3 text-xs text-yellow-500/80">
+                        注意: 以下 <span x-text="missingFiles.length"></span> 个文件已在知识库中，但 data 目录下不存在: <span x-text="missingFiles.join('、')"></span>
+                    </div>
+                </template>
+
+                <button
+                    @click="doIngest()"
+                    :disabled="ingestLoading || selectedCount === 0"
+                    class="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                    <span x-show="!ingestLoading">批量导入所选 (<span x-text="selectedCount"></span>)</span>
+                    <span x-show="ingestLoading">导入中...</span>
+                </button>
             </div>
 
             <template x-if="ingestResult">
@@ -144,27 +226,22 @@
                     <h3 class="font-medium mb-2" :class="ingestResult.status === 'ok' ? 'text-green-400' : 'text-red-400'">
                         <span x-text="ingestResult.status === 'ok' ? '✅ 导入成功' : '❌ 导入失败'"></span>
                     </h3>
+                    <template x-if="ingestResult.status !== 'ok'">
+                        <p class="text-sm text-red-400" x-text="'错误: ' + (ingestResult.error || '未知')"></p>
+                    </template>
                     <template x-if="ingestResult.status === 'ok'">
                         <div class="text-sm text-gray-400 space-y-1">
-                            <p>文档数: <span class="text-white" x-text="ingestResult.documents"></span></p>
-                            <p>分块数: <span class="text-white" x-text="ingestResult.chunks"></span></p>
+                            <p>
+                                新增 <span class="text-white" x-text="ingestResult.added"></span> ·
+                                更新 <span class="text-white" x-text="ingestResult.updated"></span> ·
+                                跳过 <span class="text-white" x-text="ingestResult.unchanged"></span> ·
+                                删除 <span class="text-white" x-text="ingestResult.deleted"></span>
+                            </p>
+                            <p>实际写入分块: <span class="text-white" x-text="ingestResult.chunks"></span></p>
                         </div>
                     </template>
                 </div>
             </template>
-
-            <!-- File List -->
-            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
-                <h2 class="text-lg font-semibold mb-4">已导入文件</h2>
-                <div class="text-sm text-gray-400 mb-2">
-                    共 <span class="text-white" x-text="fileList.length"></span> 个文件
-                </div>
-                <div class="max-h-64 overflow-y-auto space-y-1">
-                    <template x-for="f in fileList" :key="f">
-                        <div class="text-xs text-gray-500 font-mono py-0.5" x-text="f"></div>
-                    </template>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -225,24 +302,210 @@
         </div>
     </div>
 
+    <!-- Imports Tab -->
+    <div x-show="activeTab === 'imports'" class="flex-1 overflow-y-auto px-6 py-6">
+        <div class="max-w-3xl mx-auto space-y-6">
+
+            <!-- Detail View -->
+            <div x-show="restoringImport" class="text-gray-400 text-sm">正在加载导入详情…</div>
+            <div x-show="selectedSession" class="fade-in">
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <button @click="backToImports()" class="text-sm text-gray-400 hover:text-white mb-4">← 返回列表</button>
+                    <h2 class="text-lg font-semibold mb-4">导入详情 #<span x-text="selectedSession.id"></span></h2>
+                    <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mb-4">
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">时间</span><span x-text="selectedSession.ts"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">路径</span><span class="font-mono text-xs break-all text-right" x-text="shortPath(selectedSession.path)" :title="selectedSession.path"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">文档数</span><span x-text="selectedSession.documents"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">分块数</span><span x-text="selectedSession.chunks"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">增量</span><span class="text-xs" x-text="'新增 ' + selectedSession.added + ' / 更新 ' + selectedSession.updated + ' / 未变 ' + selectedSession.unchanged + ' / 删除 ' + selectedSession.deleted"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">重建索引</span><span x-text="selectedSession.recreate ? '是' : '否'"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">状态</span><span :class="selectedSession.status === 'ok' ? 'text-green-400' : 'text-red-400'" x-text="selectedSession.status"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">耗时</span><span x-text="formatDuration(selectedSession.duration_ms)"></span></div>
+                        <div class="flex justify-between border-b border-gray-700 py-1"><span class="text-gray-400">Embedding</span><span x-text="selectedSession.embedding_model || '-'"></span></div>
+                    </div>
+                    <template x-if="selectedSession.error">
+                        <div class="bg-red-900/40 border border-red-700 rounded-lg p-3 text-sm text-red-300 mb-4" x-text="selectedSession.error"></div>
+                    </template>
+
+                    <h3 class="font-medium mb-2">本次导入文件 <span class="text-gray-500 text-xs" x-text="'新增 ' + selectedSession.added + ' / 更新 ' + selectedSession.updated + ' / 未变 ' + selectedSession.unchanged + ' / 删除 ' + selectedSession.deleted"></span></h3>
+                    <div class="max-h-60 overflow-y-auto border border-gray-700 rounded-lg mb-5">
+                        <table class="w-full text-sm">
+                            <thead class="text-left text-gray-400 bg-gray-900 sticky top-0">
+                                <tr>
+                                    <th class="py-2 px-3">文件</th>
+                                    <th class="py-2 px-3 w-20">状态</th>
+                                    <th class="py-2 px-3 w-16">分块</th>
+                                    <th class="py-2 px-3 w-24">大小</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="f in selectedSession.files" :key="f.filename">
+                                    <tr class="border-t border-gray-700">
+                                        <td class="py-1.5 px-3 font-mono text-xs break-all text-blue-400/80 hover:text-blue-300 hover:underline cursor-pointer" @click="viewFile(f.rel_path)" x-text="shortPath(f.rel_path)" :title="f.rel_path"></td>
+                                        <td class="py-1.5 px-3" :class="statusColor(f.status)" x-text="statusLabel(f.status)"></td>
+                                        <td class="py-1.5 px-3" x-text="f.chunk_count"></td>
+                                        <td class="py-1.5 px-3 text-gray-500" x-text="formatSize(f.file_size)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3 class="font-medium mb-2">导入后全部文档 <span class="text-gray-500 text-xs" x-text="'(' + selectedSession.snapshot_files.length + ' 个, 共 ' + selectedSession.total_chunks + ' 分块)'"></span></h3>
+                    <div class="max-h-60 overflow-y-auto border border-gray-700 rounded-lg">
+                        <table class="w-full text-sm">
+                            <thead class="text-left text-gray-400 bg-gray-900 sticky top-0">
+                                <tr>
+                                    <th class="py-2 px-3">文件</th>
+                                    <th class="py-2 px-3 w-16">分块</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="f in selectedSession.snapshot_files" :key="f.rel_path">
+                                    <tr class="border-t border-gray-700">
+                                        <td class="py-1.5 px-3 font-mono text-xs break-all text-blue-400/80 hover:text-blue-300 hover:underline cursor-pointer" @click="viewFile(f.rel_path)" x-text="shortPath(f.rel_path)" :title="f.rel_path"></td>
+                                        <td class="py-1.5 px-3" x-text="f.chunk_count"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- List View -->
+            <template x-if="!selectedSession && !restoringImport">
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                        <h2 class="text-lg font-semibold">导入记录</h2>
+                        <div class="flex items-center gap-2">
+                            <input
+                                x-model="importSearch"
+                                @keyup.enter="loadImports()"
+                                type="text"
+                                placeholder="按路径搜索..."
+                                class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-400 w-52"
+                            >
+                            <button @click="loadImports()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">🔍 搜索</button>
+                            <button @click="importSearch = ''; loadImports()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">🔄 刷新</button>
+                        </div>
+                    </div>
+                    <template x-if="importSessions.length === 0">
+                        <div class="text-gray-500 text-sm py-8 text-center">暂无导入记录（导入文档后会自动记录）</div>
+                    </template>
+                    <template x-if="importSessions.length > 0">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="text-left text-gray-400">
+                                    <tr>
+                                        <th class="py-2 pr-3">#</th>
+                                        <th class="py-2 pr-3">时间</th>
+                                        <th class="py-2 pr-3">路径</th>
+                                        <th class="py-2 pr-3 w-16">新增</th>
+                                        <th class="py-2 pr-3 w-16">导入后</th>
+                                        <th class="py-2 pr-3 w-14">重建</th>
+                                        <th class="py-2 pr-3 w-20">状态</th>
+                                        <th class="py-2 pr-3 w-20">耗时</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="s in importSessions" :key="s.id">
+                                        <tr @click="viewSession(s.id)" class="border-t border-gray-700 hover:bg-gray-700 cursor-pointer transition-colors">
+                                            <td class="py-2 pr-3 text-gray-500" x-text="s.id"></td>
+                                            <td class="py-2 pr-3" x-text="s.ts"></td>
+                                            <td class="py-2 pr-3 font-mono text-xs max-w-[16rem] break-all" x-text="shortPath(s.path)" :title="s.path"></td>
+                                            <td class="py-2 pr-3" x-text="s.added" :title="'新增 ' + s.added + ' / 更新 ' + s.updated + ' / 未变 ' + s.unchanged + ' / 删除 ' + s.deleted"></td>
+                                            <td class="py-2 pr-3" x-text="s.total_files" :title="'导入后 ' + s.total_files + ' 个文件 / ' + s.total_chunks + ' 个分块'"></td>
+                                            <td class="py-2 pr-3" x-text="s.recreate ? '是' : '否'"></td>
+                                            <td class="py-2 pr-3" :class="s.status === 'ok' ? 'text-green-400' : 'text-red-400'" x-text="s.status"></td>
+                                            <td class="py-2 pr-3 text-gray-500" x-text="formatDuration(s.duration_ms)"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                    <p class="text-xs text-gray-600 mt-3">点击任意记录查看该次导入的文件明细</p>
+                </div>
+            </template>
+
+        </div>
+    </div>
+
+    <!-- Source Modal -->
+    <div x-show="sourceModal.open" class="modal-backdrop" @click.self="closeSource()">
+        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-2xl max-h-[80vh] flex flex-col fade-in">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
+                <div class="flex items-center gap-2 text-sm">
+                    <span class="text-gray-400">来源: </span>
+                    <span class="font-mono text-xs" x-text="sourceModal.filename"></span>
+                    <span x-show="sourceModal.score" class="text-gray-500" x-text="'得分 ' + sourceModal.score"></span>
+                </div>
+                <button @click="closeSource()" class="text-gray-400 hover:text-white text-lg leading-none px-1">✕</button>
+            </div>
+            <div class="px-5 py-4 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed" x-html="sourceModal.html"></div>
+        </div>
+    </div>
+    <!-- File Modal -->
+    <div x-show="fileModal.open" class="modal-backdrop" @click.self="closeFile()">
+        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-3xl max-h-[85vh] flex flex-col fade-in">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
+                <div class="flex items-center gap-2 text-sm min-w-0">
+                    <span class="text-gray-400 shrink-0">文件: </span>
+                    <span class="font-mono text-xs text-gray-200 truncate" x-text="fileModal.filename"></span>
+                </div>
+                <button @click="closeFile()" class="text-gray-400 hover:text-white text-lg leading-none px-1 shrink-0">✕</button>
+            </div>
+            <div class="px-5 py-4 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed" x-text="fileModal.content"></div>
+        </div>
+    </div>
+
 </div>
 
 <script>
 function app() {
+    const savedTab = sessionStorage.getItem('ragTab');
     return {
-        activeTab: 'chat',
+        activeTab: ['chat', 'ingest', 'status', 'imports'].includes(savedTab) ? savedTab : 'chat',
         question: '',
         messages: [],
         loading: false,
 
-        ingestPath: 'data',
         ingestRecreate: false,
+        ingestDeleteMissing: true,
         ingestLoading: false,
         ingestResult: null,
-        fileList: [],
+        fsItems: [],
+        fsTreeRows: [],
+        fsCollapsed: {},
+        dirFiles: {},
+        selected: {},
+        missingFiles: [],
+        fsSummary: { total: 0, imported: 0, unimported: 0 },
+        fsSearch: '',
+        fsTreeHeight: (() => {
+            const h = parseInt(sessionStorage.getItem('ragFsH') || '', 10);
+            return h >= 120 ? h : 288;
+        })(),
+        fsResizing: false,
+        fsResizeY0: 0,
+        fsResizeH0: 288,
+
+        collections: [],
+        currentCollection: '',
+        newCollectionName: '',
+        collectionSwitching: false,
 
         statusInfo: {},
         configInfo: {},
+
+        importSessions: [],
+        importSearch: '',
+        selectedSession: null,
+
+        sourceModal: { open: false, filename: '', score: null, html: '' },
+        fileModal: { open: false, filename: '', content: '' },
+        restoringImport: false,
 
         get statusText() {
             const n = this.statusInfo.points_count;
@@ -253,7 +516,67 @@ function app() {
         },
 
         async init() {
-            await Promise.all([this.loadStatus(), this.loadConfig(), this.loadFiles()]);
+            const sid = sessionStorage.getItem('ragImportSession');
+            this.restoringImport = !!(sid && sessionStorage.getItem('ragTab') === 'imports');
+            await this.loadCollections();
+            await Promise.all([this.loadStatus(), this.loadConfig(), this.loadFiles(), this.loadImports()]);
+            if (this.restoringImport) {
+                await this.viewSession(sid);
+                this.restoringImport = false;
+            }
+        },
+
+        setActiveTab(tab) {
+            sessionStorage.setItem('ragTab', tab);
+            this.activeTab = tab;
+            if (tab === 'imports') this.loadImports();
+        },
+
+        async loadCollections() {
+            try {
+                const res = await fetch('/api/collections');
+                const data = await res.json();
+                this.collections = data.collections || [];
+                this.currentCollection = data.current || '';
+            } catch (e) {
+                console.error(e);
+            }
+        },
+
+        async switchCollection(name) {
+            if (!name || this.collectionSwitching || name === this.currentCollection) return;
+            this.collectionSwitching = true;
+            try {
+                const res = await fetch('/api/collections/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '切换失败');
+                }
+                const data = await res.json();
+                this.collections = data.collections || [];
+                this.currentCollection = data.current || '';
+                this.selected = {};
+                this.newCollectionName = '';
+                this.fsCollapsed = {};
+                await this.loadFiles();
+                await this.loadImports();
+                await this.loadStatus();
+            } catch (e) {
+                console.error(e);
+                alert(e.message);
+            } finally {
+                this.collectionSwitching = false;
+            }
+        },
+
+        async createCollection() {
+            const name = this.newCollectionName.trim();
+            if (!name) return;
+            await this.switchCollection(name);
         },
 
         async sendQuery() {
@@ -264,14 +587,14 @@ function app() {
             this.question = '';
             this.loading = true;
 
-            this.messages.push({ role: 'assistant', content: '', sources: [] });
+            this.messages.push({ role: 'assistant', content: '', sources: [], retrieved: [], question: q });
             const idx = this.messages.length - 1;
 
             try {
                 const res = await fetch('/api/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: q }),
+                    body: JSON.stringify({ question: q, top_k: this.configInfo.top_k || 3 }),
                 });
 
                 const reader = res.body.getReader();
@@ -294,6 +617,7 @@ function app() {
                                 this.messages[idx].content += event.text;
                             } else if (event.type === 'done') {
                                 this.messages[idx].sources = event.sources || [];
+                                this.messages[idx].retrieved = event.retrieved || [];
                                 if (event.answer && !this.messages[idx].content) {
                                     this.messages[idx].content = event.answer;
                                 }
@@ -312,22 +636,186 @@ function app() {
             });
         },
 
-        async doIngest() {
+        async runIngest(paths) {
             this.ingestLoading = true;
             this.ingestResult = null;
             try {
                 const res = await fetch('/api/ingest', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: this.ingestPath, recreate: this.ingestRecreate }),
+                    body: JSON.stringify({
+                        paths,
+                        recreate: this.ingestRecreate,
+                        delete_missing: this.ingestDeleteMissing,
+                    }),
                 });
                 this.ingestResult = await res.json();
+                this.selected = {};
                 await this.loadStatus();
                 await this.loadFiles();
             } catch (e) {
                 this.ingestResult = { status: 'error', error: e.message };
             }
             this.ingestLoading = false;
+        },
+
+        async doIngest() {
+            const paths = Object.keys(this.selected);
+            if (!paths.length) return;
+            await this.runIngest(paths);
+        },
+
+        startFsResize(e) {
+            e.preventDefault();
+            this.fsResizing = true;
+            this.fsResizeY0 = e.clientY;
+            this.fsResizeH0 = this.fsTreeHeight;
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+        },
+
+        fsResizeDrag(e) {
+            if (!this.fsResizing) return;
+            const h = this.fsResizeH0 + (e.clientY - this.fsResizeY0);
+            const maxH = Math.round((window.innerHeight || 800) * 0.75);
+            this.fsTreeHeight = Math.max(120, Math.min(h, maxH));
+            sessionStorage.setItem('ragFsH', this.fsTreeHeight);
+        },
+
+        fsResizeEnd() {
+            if (!this.fsResizing) return;
+            this.fsResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        },
+
+        get selectedCount() {
+            return Object.keys(this.selected).length;
+        },
+
+        async loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                this.fsItems = data.items || [];
+                this.missingFiles = (data.missing || []).map(m => m.filename);
+                this.fsSummary = data.summary || { total: 0, imported: 0, unimported: 0 };
+                this.fsCollapsed = {};
+                this.rebuildTree();
+            } catch {}
+        },
+
+        rebuildTree() {
+            const root = { dir: true, children: new Map(), total: 0, imported: 0, chunks: 0 };
+            for (const it of this.fsItems) {
+                const parts = it.rel.split('/');
+                let node = root;
+                parts.forEach((part, i) => {
+                    if (i === parts.length - 1) {
+                        node.children.set(part, {
+                            name: part, dir: false, file: it,
+                            children: new Map(), total: 1,
+                            imported: it.imported ? 1 : 0, chunks: it.chunks,
+                        });
+                    } else {
+                        let next = node.children.get(part);
+                        if (!next) {
+                            next = { name: part, dir: true, children: new Map(), total: 0, imported: 0, chunks: 0 };
+                            node.children.set(part, next);
+                        }
+                        node = next;
+                    }
+                });
+            }
+
+            const dirFiles = {};
+            const count = (node, rel) => {
+                if (!node.dir) return { total: 1, imported: node.imported, rels: [rel] };
+                let total = 0, imported = 0;
+                const rels = [];
+                for (const [name, child] of node.children) {
+                    const childRel = rel ? rel + '/' + name : name;
+                    const r = count(child, childRel);
+                    total += r.total;
+                    imported += r.imported;
+                    rels.push(...r.rels);
+                }
+                node.total = total;
+                node.imported = imported;
+                dirFiles[rel] = rels;
+                return { total, imported, rels };
+            };
+            for (const [name, child] of root.children) count(child, name);
+            this.dirFiles = dirFiles;
+
+            const rows = [];
+            const q = this.fsSearch.trim().toLowerCase();
+            const searchKeep = new Set();
+            if (q) {
+                const nameMatch = name => name.toLowerCase().includes(q);
+                const relMatch = rel => rel.toLowerCase().includes(q);
+                const mark = (node, rel) => {
+                    let keep = nameMatch(node.name) || relMatch(rel);
+                    for (const [kname, kchild] of node.children) {
+                        if (mark(kchild, rel ? rel + '/' + kname : kname)) keep = true;
+                    }
+                    if (keep) searchKeep.add(rel);
+                    return keep;
+                };
+                for (const [name, child] of root.children) mark(child, name);
+            }
+
+            const emit = (node, rel, depth) => {
+                if (q && !searchKeep.has(rel)) return;
+                rows.push({
+                    name: node.name, rel, depth, isDir: node.dir,
+                    expanded: !q ? !this.fsCollapsed[rel] : true,
+                    imported: node.imported, total: node.total, file: node.file,
+                });
+                if (node.dir && (q || !this.fsCollapsed[rel])) {
+                    for (const [kname, kchild] of node.children) {
+                        emit(kchild, rel + '/' + kname, depth + 1);
+                    }
+                }
+            };
+            for (const [name, child] of root.children) emit(child, name, 0);
+            this.fsTreeRows = rows;
+        },
+
+        toggleExpand(rel) {
+            if (this.fsCollapsed[rel]) delete this.fsCollapsed[rel];
+            else this.fsCollapsed[rel] = true;
+            this.rebuildTree();
+        },
+
+        dirSelState(rel) {
+            const files = this.dirFiles[rel] || [];
+            if (!files.length) return 'none';
+            const sel = files.filter(f => this.selected[f]).length;
+            if (sel === 0) return 'none';
+            return sel === files.length ? 'all' : 'some';
+        },
+
+        toggleDir(rel) {
+            const files = this.dirFiles[rel] || [];
+            const all = files.length && files.every(f => this.selected[f]);
+            for (const f of files) {
+                if (all) delete this.selected[f];
+                else this.selected[f] = true;
+            }
+        },
+
+        toggleFile(rel) {
+            if (this.selected[rel]) delete this.selected[rel];
+            else this.selected[rel] = true;
+        },
+
+        selectUnimported() {
+            for (const it of this.fsItems) if (!it.imported) this.selected[it.rel] = true;
+        },
+
+        clearSelection() {
+            this.selected = {};
         },
 
         async loadStatus() {
@@ -344,12 +832,130 @@ function app() {
             } catch {}
         },
 
-        async loadFiles() {
+        async loadImports() {
             try {
-                const res = await fetch('/api/files');
+                const params = new URLSearchParams();
+                if (this.importSearch.trim()) params.set('q', this.importSearch.trim());
+                const res = await fetch('/api/imports?' + params.toString());
                 const data = await res.json();
-                this.fileList = data.files || [];
+                this.importSessions = data.sessions || [];
             } catch {}
+        },
+
+        async viewSession(id) {
+            try {
+                sessionStorage.setItem('ragImportSession', id);
+                const res = await fetch('/api/imports/' + id);
+                this.selectedSession = await res.json();
+            } catch {}
+        },
+
+        backToImports() {
+            sessionStorage.removeItem('ragImportSession');
+            this.selectedSession = null;
+        },
+
+        openSource(msg, index) {
+            const item = msg.retrieved && msg.retrieved[index];
+            if (!item) return;
+            this.sourceModal = {
+                open: true,
+                filename: item.filename,
+                score: item.score,
+                html: this.highlightSource(item.text || '', msg.question || ''),
+            };
+        },
+
+        closeSource() {
+            this.sourceModal.open = false;
+        },
+
+        async viewFile(rel) {
+            try {
+                const res = await fetch('/api/files/content?rel=' + encodeURIComponent(rel));
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '读取失败');
+                }
+                const data = await res.json();
+                this.fileModal = {
+                    open: true,
+                    filename: data.name,
+                    content: (data.content || '（空文件）').slice(0, 200000),
+                };
+            } catch (e) {
+                alert(e.message);
+            }
+        },
+
+        closeFile() {
+            this.fileModal.open = false;
+        },
+
+        highlightSource(text, question) {
+            const escaped = (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const textLower = escaped.toLowerCase();
+            const tokens = [];
+            const add = t => {
+                if (!t || t.length < 2 || tokens.indexOf(t) !== -1) return;
+                tokens.push(t);
+            };
+            const re = /[a-zA-Z0-9]+|[\u4e00-\u9fff]+/g;
+            let m;
+            while ((m = re.exec(question || '')) !== null) {
+                const tok = m[0];
+                if (/^[\u4e00-\u9fff]+$/.test(tok)) {
+                    const covered = new Array(tok.length).fill(false);
+                    for (let len = Math.min(tok.length, 20); len >= 2; len--) {
+                        for (let i = 0; i + len <= tok.length; i++) {
+                            if (covered.slice(i, i + len).some(Boolean)) continue;
+                            const sub = tok.slice(i, i + len);
+                            if (!textLower.includes(sub.toLowerCase())) continue;
+                            add(sub);
+                            for (let j = i; j < i + len; j++) covered[j] = true;
+                        }
+                    }
+                } else if (textLower.includes(tok.toLowerCase())) {
+                    add(tok);
+                }
+            }
+            if (tokens.length === 0) return escaped;
+            tokens.sort((a, b) => b.length - a.length);
+            const kept = [];
+            for (const t of tokens) {
+                if (!kept.some(k => k.toLowerCase().indexOf(t.toLowerCase()) !== -1)) kept.push(t);
+            }
+            const pattern = kept.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+            try {
+                return escaped.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark class="hl">$1</mark>');
+            } catch (e) {
+                return escaped;
+            }
+        },
+
+        statusLabel(s) {
+            return s === 'added' ? '新增' : s === 'updated' ? '更新' : s === 'unchanged' ? '未变' : s === 'deleted' ? '删除' : s;
+        },
+
+        statusColor(s) {
+            return s === 'added' ? 'text-green-400' : s === 'updated' ? 'text-yellow-400' : s === 'unchanged' ? 'text-gray-400' : 'text-red-400';
+        },
+
+        formatDuration(ms) {
+            if (ms == null) return '-';
+            return (ms / 1000).toFixed(1) + 's';
+        },
+
+        formatSize(bytes) {
+            if (!bytes) return '-';
+            return (bytes / 1024).toFixed(1) + 'KB';
+        },
+
+        shortPath(p, maxLen = 42) {
+            if (!p || p.length <= maxLen) return p;
+            const head = p.slice(0, Math.max(1, maxLen - 20));
+            const tail = p.slice(-Math.min(20, p.length));
+            return head + '…' + tail;
         },
 
         renderMarkdown(text) {

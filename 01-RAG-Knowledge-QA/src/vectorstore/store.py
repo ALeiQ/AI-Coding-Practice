@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, VectorParams
 
 from src.config import settings
 
@@ -21,6 +24,26 @@ def get_client() -> QdrantClient:
     return _client
 
 
+_VALID_COLLECTION = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def list_collections(client: QdrantClient) -> list[str]:
+    try:
+        return sorted(c.name for c in client.get_collections().collections)
+    except Exception:
+        return []
+
+
+def set_active_collection(client: QdrantClient, name: str) -> None:
+    """Switch the active collection at runtime (in-memory, resets on restart)."""
+    if not name or not _VALID_COLLECTION.match(name):
+        raise ValueError(
+            "Collection name may only contain letters, digits, '-' and '_'"
+        )
+    settings.qdrant_collection = name
+    ensure_collection(client, recreate=False)
+
+
 def ensure_collection(client: QdrantClient, recreate: bool = False) -> None:
     name = settings.qdrant_collection
     if client.collection_exists(name):
@@ -32,7 +55,10 @@ def ensure_collection(client: QdrantClient, recreate: bool = False) -> None:
     client.create_collection(
         collection_name=name,
         vectors_config={
-            "dense": VectorParams(size=768, distance=Distance.COSINE),
+            "dense": VectorParams(size=settings.embedding_dim, distance=Distance.COSINE),
+        },
+        sparse_vectors_config={
+            "sparse": {},
         },
     )
 
@@ -43,17 +69,24 @@ def add_documents(
     metadatas: list[dict],
     ids: list[str],
     dense_vectors: list[list[float]],
+    sparse_vectors: list[dict] | None = None,
 ) -> None:
-    from qdrant_client.models import PointStruct
+    from qdrant_client.models import PointStruct, SparseVector
 
     points = []
     for i in range(len(texts)):
+        vector = {"dense": dense_vectors[i]}
+        if sparse_vectors and i < len(sparse_vectors):
+            sv = sparse_vectors[i]
+            vector["sparse"] = SparseVector(
+                indices=sv["indices"],
+                values=sv["values"],
+            )
+
         points.append(
             PointStruct(
                 id=ids[i],
-                vector={
-                    "dense": dense_vectors[i],
-                },
+                vector=vector,
                 payload={
                     "text": texts[i],
                     "metadata": metadatas[i],
@@ -77,3 +110,88 @@ def collection_info(client: QdrantClient) -> dict | None:
         "points_count": info.points_count,
         "status": info.status,
     }
+
+
+def distinct_filenames(client: QdrantClient) -> list[dict]:
+    """Return [{filename, chunks}] of distinct filenames actually indexed."""
+    stats = source_stats(client)
+    filename_ids: dict[str, int] = {}
+    for item in stats:
+        key = Path(item["source"]).name
+        filename_ids[key] = filename_ids.get(key, 0) + item["chunks"]
+    return [
+        {"filename": f, "chunks": c}
+        for f, c in sorted(filename_ids.items(), key=lambda x: -x[1])
+    ]
+
+
+def source_stats(client: QdrantClient) -> list[dict]:
+    """Return [{source, filename, chunks, rel_path}] grouped by metadata.source."""
+    if not client.collection_exists(settings.qdrant_collection):
+        return []
+    stats: dict[str, dict] = {}
+    offset: dict | None = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=settings.qdrant_collection,
+            limit=1000,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for p in points:
+            meta = (p.payload or {}).get("metadata", {})
+            source = meta.get("source") or meta.get("rel_path") or meta.get("filename")
+            if not source:
+                continue
+            entry = stats.setdefault(
+                source,
+                {
+                    "source": source,
+                    "filename": meta.get("filename", Path(source).name),
+                    "chunks": 0,
+                    "rel_path": meta.get("rel_path"),
+                },
+            )
+            entry["chunks"] += 1
+        if next_offset is None:
+            break
+        offset = next_offset
+    return sorted(stats.values(), key=lambda x: x["source"])
+
+
+def _source_filter(source: str) -> Filter:
+    return Filter(
+        must=[
+            FieldCondition(
+                key="metadata.source",
+                match=MatchValue(value=source),
+            )
+        ]
+    )
+
+
+def delete_by_source(client: QdrantClient, source: str) -> int:
+    """Delete all points whose metadata.source == source. Returns deleted count."""
+    if not client.collection_exists(settings.qdrant_collection):
+        return 0
+    points, _ = client.scroll(
+        collection_name=settings.qdrant_collection,
+        scroll_filter=_source_filter(source),
+        limit=1000,
+        with_vectors=True,
+    )
+    if not points:
+        return 0
+    client.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=Filter(
+            must=[
+                FieldCondition(
+                    key="metadata.source",
+                    match=MatchValue(value=source),
+                )
+            ]
+        ),
+    )
+    return len(points)
