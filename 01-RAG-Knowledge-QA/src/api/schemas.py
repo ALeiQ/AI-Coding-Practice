@@ -62,6 +62,35 @@ class ConfigResponse(BaseModel):
     qdrant_url: str
 
 
+class ModelInfo(BaseModel):
+    name: str
+    size: Optional[int] = None
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    current: str
+
+
+class ModelSelectRequest(BaseModel):
+    model: str
+
+
+class ModelPullRequest(BaseModel):
+    model: str
+
+
+class ModelPullProgress(BaseModel):
+    model: Optional[str] = None
+    phase: str = "idle"
+    completed: Optional[int] = 0
+    total: Optional[int] = 0
+    pct: Optional[float] = 0
+    error: Optional[str] = None
+    active: bool = False
+    done: bool = False
+
+
 class ImportFile(BaseModel):
     filename: str
     rel_path: str

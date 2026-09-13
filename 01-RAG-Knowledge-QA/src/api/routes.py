@@ -21,6 +21,11 @@ from src.api.schemas import (
     IngestCancelRequest,
     IngestRequest,
     IngestResponse,
+    ModelInfo,
+    ModelPullProgress,
+    ModelPullRequest,
+    ModelSelectRequest,
+    ModelsResponse,
     QueryRequest,
     StatusResponse,
 )
@@ -37,6 +42,8 @@ from src.ingest import progress as ingest_progress
 from src.ingest.loader import load_file
 from src.ingest.pipeline import ingest_paths
 from src.qa.chain import answer_question_stream
+from src.qa.model_pull import get_pull_progress, is_pull_active, start_pull, validate_model_name
+from src.qa.model_state import get_current_model, set_current_model
 from src.vectorstore.naming import (
     delete_alias,
     display_name,
@@ -180,13 +187,78 @@ async def status():
 async def config():
     return ConfigResponse(
         embedding_model=settings.dense_embedding_model,
-        llm_model=settings.ollama_model,
+        llm_model=get_current_model(),
         llm_base_url=settings.ollama_base_url,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
         top_k=settings.top_k,
         qdrant_url=settings.qdrant_url,
     )
+
+
+def _list_ollama_models() -> list[dict]:
+    import requests as _requests
+
+    resp = _requests.get(
+        f"{settings.ollama_base_url}/api/tags",
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get("models", [])
+
+
+@router.get("/models", response_model=ModelsResponse)
+async def list_models():
+    try:
+        tags = await run_in_threadpool(_list_ollama_models)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"无法连接 Ollama: {exc}")
+    models = [
+        ModelInfo(name=m.get("name", ""), size=m.get("size"))
+        for m in tags
+        if m.get("name")
+    ]
+    models.sort(key=lambda m: m.name)
+    return ModelsResponse(models=models, current=get_current_model())
+
+
+@router.post("/models", response_model=ModelsResponse)
+async def select_model(req: ModelSelectRequest):
+    name = (req.model or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="模型名不能为空")
+    try:
+        tags = await run_in_threadpool(_list_ollama_models)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"无法连接 Ollama: {exc}")
+    available = {m for m in (t.get("name", "") for t in tags) if m}
+    if name not in available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"模型 {name} 不存在于 Ollama（可用: {', '.join(sorted(available)) or '无'}）",
+        )
+    set_current_model(name)
+    models = [ModelInfo(name=m.get("name", ""), size=m.get("size")) for m in tags if m.get("name")]
+    models.sort(key=lambda m: m.name)
+    return ModelsResponse(models=models, current=get_current_model())
+
+
+@router.post("/models/pull", response_model=ModelPullProgress)
+async def pull_model(req: ModelPullRequest):
+    if is_pull_active():
+        raise HTTPException(status_code=409, detail="已有模型在下载，请等待完成")
+    invalid = validate_model_name(req.model)
+    if invalid:
+        raise HTTPException(status_code=400, detail=invalid)
+    result = start_pull(req.model)
+    if result == "busy":
+        raise HTTPException(status_code=409, detail="已有模型在下载，请等待完成")
+    return get_pull_progress()
+
+
+@router.get("/models/pull/progress", response_model=ModelPullProgress)
+async def pull_progress():
+    return get_pull_progress()
 
 
 @router.get("/files")

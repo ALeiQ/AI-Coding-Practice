@@ -5,6 +5,7 @@ from collections.abc import Generator
 import requests as _requests
 
 from src.config import settings
+from src.qa.model_state import get_current_model
 from src.retrieval.hybrid import RetrievedChunk, search
 
 SYSTEM_PROMPT = """你是一个知识库问答助手。基于以下检索到的文档片段回答用户问题。
@@ -69,9 +70,9 @@ def answer_question(
     resp = _requests.post(
         f"{OLLAMA_BASE}/api/chat",
         json={
-            "model": settings.ollama_model,
+            "model": get_current_model(),
             "messages": _make_messages(context, question),
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_ctx": 8192},
             "stream": False,
         },
         timeout=300,
@@ -106,9 +107,9 @@ def answer_question_stream(
     with _requests.post(
         f"{OLLAMA_BASE}/api/chat",
         json={
-            "model": settings.ollama_model,
+            "model": get_current_model(),
             "messages": _make_messages(context, question),
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_ctx": 8192},
             "stream": True,
         },
         stream=True,
