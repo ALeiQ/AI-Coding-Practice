@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG 知识库问答</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/app.css">
+    <script>document.documentElement.dataset.theme = (function () { try { return localStorage.getItem('ragTheme') || 'default'; } catch (e) { return 'default'; } })();</script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
@@ -15,142 +17,203 @@
         .typing-dot:nth-child(3) { animation-delay: 0.4s; }
         @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
         html, body { height: 100%; margin: 0; }
-        .hl { background: #facc15; color: #1f2937; padding: 0 1px; border-radius: 2px; }
         .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 40; display: flex; align-items: center; justify-content: center; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 h-full flex flex-col">
+<body class="text-gray-100 h-full flex flex-col">
 
 <div x-data="app()" x-init="init()" class="flex flex-col h-full">
 
     <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between shrink-0">
+    <header class="glass-header px-6 py-3 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
-            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">R</div>
+            <div class="app-logo w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm">R</div>
             <h1 class="text-lg font-semibold">RAG 知识库问答</h1>
         </div>
-        <div class="flex items-center gap-4 text-sm text-gray-400">
-            <span x-text="statusText"></span>
-            <span class="text-gray-600">|</span>
-            <span x-text="configText"></span>
+        <div class="flex items-center gap-3 text-sm">
+            <div class="flex items-center gap-1.5">
+                <template x-for="t in themeOptions" :key="t.id">
+                    <button type="button"
+                        @click="theme = t.id; applyTheme()"
+                        :title="t.name"
+                        :class="theme === t.id ? 'theme-swatch on' : 'theme-swatch'"
+                        :style="'background:' + t.grad">
+                        <span class="tick" x-show="theme === t.id">✓</span>
+                    </button>
+                </template>
+            </div>
+            <span class="badge-dim" x-text="statusText"></span>
+            <span class="badge-dim" x-text="configText"></span>
         </div>
     </header>
 
     <!-- Tab Bar -->
-    <div class="bg-gray-800 border-b border-gray-700 px-6 flex gap-1 shrink-0">
-        <template x-for="tab in ['chat', 'ingest', 'imports', 'status']" :key="tab">
+    <div class="glass-header px-6 flex gap-1 shrink-0">
+        <template x-for="tab in ['chat', 'ingest', 'manage', 'status', 'imports']" :key="tab">
             <button
                 @click="setActiveTab(tab)"
-                :class="activeTab === tab ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'"
+                :class="activeTab === tab ? 'tab-btn tab-on text-white' : 'tab-btn text-gray-400 hover:text-gray-200 hover:bg-white/5'"
                 class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-                x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : tab === 'imports' ? '📚 导入记录' : '📊 状态'"
+                x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : tab === 'manage' ? '📖 知识库管理' : tab === 'imports' ? '📚 导入记录' : '📊 状态'"
             ></button>
         </template>
     </div>
 
     <!-- Chat Tab -->
-    <div x-show="activeTab === 'chat'" class="flex-1 flex flex-col overflow-hidden">
-        <!-- Messages -->
-        <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" x-ref="chatBox">
-            <template x-if="messages.length === 0">
-                <div class="flex flex-col items-center justify-center h-full text-gray-500">
-                    <div class="text-4xl mb-4">🤖</div>
-                    <p class="text-lg">向知识库提问</p>
-                    <p class="text-sm mt-1">基于你的文档回答问题</p>
-                </div>
-            </template>
-            <template x-for="(msg, i) in messages" :key="i">
-                <div class="fade-in" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-                    <div :class="msg.role === 'user'
-                        ? 'bg-blue-600 text-white rounded-2xl rounded-br-md max-w-[70%]'
-                        : 'bg-gray-700 text-gray-100 rounded-2xl rounded-bl-md max-w-[80%]'"
-                        class="px-4 py-3">
-                        <div class="whitespace-pre-wrap text-sm leading-relaxed" x-html="renderMarkdown(msg.content)"></div>
-                        <template x-if="msg.sources && msg.sources.length > 0">
-                            <div class="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
-                                <span>📎 来源: </span>
-                                <template x-for="(s, si) in msg.sources" :key="si">
-                                    <button
-                                        @click="msg.retrieved && msg.retrieved[si] ? openSource(msg, si) : null"
-                                        :class="msg.retrieved && msg.retrieved[si] ? 'hover:bg-blue-600 cursor-pointer' : 'cursor-default'"
-                                        class="inline-block bg-gray-600 rounded px-1.5 py-0.5 mr-1 transition-colors"
-                                        x-text="s"
-                                    ></button>
-                                </template>
+    <div x-show="activeTab === 'chat'" class="flex-1 flex overflow-hidden">
+        <aside class="w-52 shrink-0 border-r border-gray-700/60 flex flex-col">
+            <div class="p-3 border-b border-gray-700/60">
+                <button @click="newChat()" class="btn-send w-full text-white px-3 py-2 rounded-lg text-sm font-medium">+ 新建会话</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 space-y-1.5">
+                <template x-for="s in chatSessions" :key="s.id">
+                    <div @click="switchChat(s.id)" :class="s.id === activeChatId ? 'session-item session-active' : 'session-item'">
+                        <div class="flex items-center gap-1">
+                            <input x-show="editChatId === s.id"
+                                x-model="editChatName"
+                                :id="'chatRen' + s.id"
+                                @keydown.enter="commitRename(s)"
+                                @blur="commitRename(s)"
+                                class="input-field rounded px-2 py-0.5 text-sm min-w-0 flex-1 placeholder-gray-500"
+                                placeholder="会话名称">
+                            <div x-show="editChatId !== s.id" class="flex items-center gap-1 min-w-0">
+                                <span class="truncate text-sm" :title="s.title" x-text="s.title"></span>
+                                <button type="button" @click.stop="startRename(s)" class="shrink-0 text-gray-500 hover:text-white text-xs leading-none px-0.5" title="重命名">✎</button>
                             </div>
-                        </template>
-                    </div>
-                </div>
-            </template>
-            <template x-if="loading">
-                <div class="flex justify-start fade-in">
-                    <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3">
-                        <div class="flex gap-1">
-                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
-                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
-                            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            <button type="button" @click.stop="deleteChat(s.id)" class="ml-auto shrink-0 text-gray-500 hover:text-white text-sm leading-none px-1">✕</button>
+                        </div>
+                        <div class="relative mt-1.5">
+                            <button type="button" @click.stop="chatCollOpenFor = (chatCollOpenFor === s.id ? null : s.id)"
+                                class="dd-trigger w-full" :class="chatCollOpenFor === s.id ? 'open' : ''">
+                                <span class="dd-label truncate" x-text="s.collection || '未绑定集合'"></span>
+                                <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                            </button>
+                            <template x-if="chatCollOpenFor === s.id">
+                                <div class="dd-panel" @click.outside="chatCollOpenFor = null">
+                                    <template x-for="c in collections" :key="c">
+                                        <button type="button" @click.stop="s.collection = c; chatCollOpenFor = null; saveChatSessions();"
+                                            class="dd-item" :class="c === s.collection ? 'on' : ''">
+                                            <span class="truncate" x-text="c"></span>
+                                            <span x-show="c === s.collection">✓</span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
                         </div>
                     </div>
-                </div>
-            </template>
-        </div>
+                </template>
+            </div>
+        </aside>
 
-        <!-- Input -->
-        <div class="border-t border-gray-700 px-6 py-4 bg-gray-800 shrink-0">
-            <form @submit.prevent="sendQuery()" class="flex gap-3">
-                <input
-                    x-model="question"
-                    type="text"
-                    placeholder="输入你的问题..."
-                    :disabled="loading"
-                    class="flex-1 bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder-gray-400"
-                >
-                <button
-                    type="submit"
-                    :disabled="loading || !question.trim()"
-                    class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors"
-                >
-                    发送
-                </button>
-            </form>
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Messages -->
+            <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" x-ref="chatBox">
+                <template x-if="activeSession().messages.length === 0">
+                    <div class="hero-glow flex flex-col items-center justify-center h-full text-gray-500">
+                        <div class="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500/20 to-cyan-400/20 border border-blue-400/20 flex items-center justify-center text-4xl mb-4">🤖</div>
+                        <p class="text-lg text-slate-300 font-medium">向知识库提问</p>
+                        <p class="text-sm mt-1 text-slate-500">基于你的文档回答问题</p>
+                    </div>
+                </template>
+                <template x-for="(msg, i) in activeSession().messages" :key="i">
+                    <div class="fade-in" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                        <div :class="msg.role === 'user'
+                            ? 'bubble-user text-white rounded-2xl rounded-br-md max-w-[70%]'
+                            : 'bubble-ai text-gray-100 rounded-2xl rounded-bl-md max-w-[80%]'"
+                            class="px-4 py-3">
+                            <div class="whitespace-pre-wrap text-sm leading-relaxed" x-html="renderMarkdown(msg.content, msg.question)"></div>
+                            <template x-if="msg.sources && msg.sources.length > 0">
+                                <div class="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
+                                    <span>📎 来源: </span>
+                                    <template x-for="(s, si) in msg.sources" :key="si">
+                                        <button
+                                            @click="msg.retrieved && msg.retrieved[si] ? openSource(msg, si) : null"
+                                            :class="msg.retrieved && msg.retrieved[si] ? 'cursor-pointer' : 'cursor-default'"
+                                            class="src-chip inline-block rounded-full px-1.5 py-0.5 mr-1"
+                                            x-text="s"
+                                        ></button>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="loading">
+                    <div class="flex justify-start fade-in">
+                        <div class="bubble-ai rounded-2xl rounded-bl-md px-4 py-3">
+                            <div class="flex gap-1">
+                                <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                                <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                                <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Input -->
+            <div class="glass-inputbar px-6 py-4 shrink-0">
+                <form @submit.prevent="sendQuery()" class="flex gap-3">
+                    <input
+                        x-model="question"
+                        type="text"
+                        placeholder="输入你的问题..."
+                        :disabled="loading"
+                        class="input-field flex-1 rounded-xl px-4 py-3 text-sm disabled:opacity-50 placeholder-gray-400"
+                    >
+                    <button
+                        type="submit"
+                        :disabled="loading || !question.trim()"
+                        class="btn-send disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium"
+                    >
+                        发送
+                    </button>
+                </form>
+            </div>
         </div>
     </div>
 
     <!-- Ingest Tab -->
     <div x-show="activeTab === 'ingest'" class="flex-1 overflow-y-auto px-6 py-6">
         <div class="max-w-2xl mx-auto space-y-6">
-            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <div class="glass-card rounded-2xl p-6 lift">
                 <div class="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-700 text-sm">
-                    <span class="text-gray-400">知识库集合</span>
-                    <span class="font-mono text-white bg-gray-700 rounded px-2 py-1" x-text="currentCollection"></span>
-                    <select :value="currentCollection" @change="switchCollection($event.target.value)"
-                        :disabled="collectionSwitching"
-                            class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500">
-                        <template x-for="c in collections" :key="c">
-                            <option :value="c" x-text="c"></option>
+                    <span class="text-gray-400">当前导入到</span>
+                    <div class="relative" @click.outside="collectionOpen = false">
+                        <button type="button" @click="collectionOpen = !collectionOpen" :disabled="collectionSwitching"
+                            :class="collectionOpen ? 'dd-trigger open' : 'dd-trigger'">
+                            <span class="dd-label" x-text="currentCollection"></span>
+                            <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                        </button>
+                        <template x-if="collectionOpen">
+                            <div class="dd-panel">
+                                <template x-for="c in collections" :key="c">
+                                    <button type="button" @click="switchCollection(c); collectionOpen = false"
+                                        class="dd-item" :class="c === currentCollection ? 'on' : ''">
+                                        <span class="truncate" x-text="c"></span>
+                                        <span x-show="c === currentCollection">✓</span>
+                                    </button>
+                                </template>
+                            </div>
                         </template>
-                    </select>
-                    <input x-model="newCollectionName" type="text" placeholder="新建集合名"
-                           class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs w-36 focus:outline-none focus:border-blue-500 placeholder-gray-500">
-                    <button @click="createCollection()" :disabled="collectionSwitching || !newCollectionName.trim()"
-                            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded px-3 py-1.5 text-xs transition-colors">新建并切换</button>
+                    </div>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
                     <h2 class="text-lg font-semibold">文件清单与批量导入</h2>
-                    <span class="text-sm text-gray-400">已导入 <span class="text-white" x-text="fsSummary.imported"></span> / <span class="text-white" x-text="fsSummary.total"></span></span>
+                    <span class="text-sm text-gray-400">已导入 <span class="text-strong" x-text="fsSummary.imported"></span> / <span class="text-strong" x-text="fsSummary.total"></span></span>
                 </div>
 
                 <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
                     <div class="relative flex items-center">
-                        <span class="absolute left-2 text-gray-500">🔍</span>
+                        <svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
                         <input x-model="fsSearch" @input="rebuildTree()" type="text" placeholder="搜索文件/目录…"
-                               class="bg-gray-700 border border-gray-600 rounded pl-7 pr-6 py-1.5 text-xs w-56 focus:outline-none focus:border-blue-500 placeholder-gray-500">
+                               class="input-field with-ico pl-8 pr-6 py-1.5 text-xs w-56 placeholder-gray-500">
                         <button x-show="fsSearch" @click="fsSearch = ''; rebuildTree()"
                                 class="absolute right-1.5 text-gray-500 hover:text-white text-sm leading-none px-1">✕</button>
                     </div>
-                    <button @click="selectUnimported()" class="bg-gray-700 hover:bg-gray-600 text-gray-200 rounded px-3 py-1.5 transition-colors">全选未导入</button>
-                    <button @click="clearSelection()" class="bg-gray-700 hover:bg-gray-600 text-gray-200 rounded px-3 py-1.5 transition-colors">清空选择</button>
+                    <button @click="selectUnimported()" class="btn-ghost text-gray-200 rounded-lg px-3 py-1.5">全选未导入</button>
+                    <button @click="clearSelection()" class="btn-ghost text-gray-200 rounded-lg px-3 py-1.5">清空选择</button>
                     <div class="flex flex-wrap items-center gap-4 ml-auto">
                         <label class="flex items-center gap-1.5 text-gray-400"><input type="checkbox" x-model="ingestRecreate" class="rounded">重建索引</label>
                         <label class="flex items-center gap-1.5 text-gray-400"><input type="checkbox" x-model="ingestDeleteMissing" class="rounded">删除已移除文件的索引</label>
@@ -159,7 +222,7 @@
 
                 <div class="overflow-y-auto border border-gray-700 rounded-lg mb-3"
                      :style="'height:' + fsTreeHeight + 'px'">
-                    <div class="text-xs text-gray-500 font-mono pl-3 py-1.5 border-b border-gray-700/60 bg-gray-900/40">📁 <span class="text-gray-300">data/</span></div>
+                    <div class="text-xs text-gray-500 font-mono pl-3 py-1.5 border-b border-gray-700/60 thead-glass">📁 <span class="text-gray-300">data/</span></div>
                     <template x-if="fsTreeRows.length === 0">
                         <div class="text-xs text-gray-500 py-4 text-center" x-text="fsSearch ? '未找到匹配项' : 'data 目录为空'"></div>
                     </template>
@@ -173,7 +236,7 @@
 
                             <template x-if="row.isDir">
                                 <span class="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5 rounded border border-gray-500 cursor-pointer select-none"
-                                      :class="dirSelState(row.rel) === 'all' ? 'bg-blue-600 border-blue-600' : ''"
+                                      :class="dirSelState(row.rel) === 'all' ? 'check-all' : ''"
                                       @click="toggleDir(row.rel)">
                                     <span x-show="dirSelState(row.rel) === 'all'" class="text-white text-[10px] leading-none">✓</span>
                                     <span x-show="dirSelState(row.rel) === 'some'" class="w-1.5 h-0.5 bg-gray-400"></span>
@@ -183,26 +246,28 @@
                                 <input type="checkbox" class="shrink-0 rounded" :checked="!!selected[row.rel]" @click="toggleFile(row.rel)">
                             </template>
 
-                            <span x-show="row.isDir ? (row.imported < row.total) : !row.file.imported"
-                                  class="w-2 h-2 shrink-0 rounded-full bg-yellow-400" title="未导入"></span>
-                            <span x-show="row.isDir ? (row.imported === row.total && row.total > 0) : row.file.imported"
-                                  class="w-2 h-2 shrink-0 rounded-full bg-green-500" title="已导入"></span>
+                            <span class="w-2 h-2 shrink-0 rounded-full"
+                                  :class="row.isDir
+                                      ? (row.imported === 0 ? 'bg-yellow-400' : row.imported === row.total ? 'bg-green-500' : '')
+                                      : (row.file.imported ? 'bg-green-500' : 'bg-yellow-400')"
+                                  :style="row.isDir && row.imported > 0 && row.imported < row.total ? dirDotStyle(row) : ''"
+                                  :title="row.isDir ? dirDotTitle(row) : (row.file.imported ? '已导入' : '未导入')"></span>
                             <span x-show="row.isDir" class="w-2 shrink-0"></span>
 
                             <span class="text-gray-200 truncate" :class="{'font-medium text-gray-100 cursor-pointer hover:underline': row.isDir, 'cursor-pointer hover:underline': !row.isDir}"
                                       @click="!row.isDir && viewFile(row.rel)" x-text="row.name"></span>
-                            <span class="ml-auto shrink-0 text-gray-600 pl-2"
-                                  x-text="row.isDir ? (row.imported + '/' + row.total) : (row.file.imported ? (row.file.chunks + ' 块') : '')"></span>
+                            <span class="ml-auto shrink-0 text-gray-400 pl-2 font-medium" :title="row.isDir ? dirDotTitle(row) : ''"
+                                  x-text="row.isDir ? dirTailLabel(row) : (row.file.imported ? (row.file.chunks + ' 块') : '')"></span>
                         </div>
                     </template>
                 </div>
 
-                <div class="mb-3 flex justify-center py-1 cursor-ns-resize select-none text-gray-600 hover:text-gray-300 -mt-1"
+                <div class="mb-3 flex justify-center gap-1 py-1 cursor-ns-resize select-none text-gray-600 hover:text-gray-300 -mt-1"
                      title="拖动调整高度"
                      @mousedown="startFsResize($event)"
                      @mousemove.window="fsResizeDrag($event)"
                      @mouseup.window="fsResizeEnd()">
-                    <span class="h-1 w-10 rounded-full bg-gray-600"></span>
+                    <span class="resize-grip-dot"></span><span class="resize-grip-dot"></span><span class="resize-grip-dot"></span>
                 </div>
 
                 <template x-if="missingFiles.length > 0">
@@ -214,30 +279,53 @@
                 <button
                     @click="doIngest()"
                     :disabled="ingestLoading || selectedCount === 0"
-                    class="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    class="btn-ingest w-full disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium"
                 >
                     <span x-show="!ingestLoading">批量导入所选 (<span x-text="selectedCount"></span>)</span>
                     <span x-show="ingestLoading">导入中...</span>
                 </button>
+
+                <div x-show="ingestLoading" class="mt-3 fade-in">
+                    <div class="flex items-center justify-between text-xs mb-1.5">
+                        <span class="text-gray-400" x-text="ingestStageText()"></span>
+                        <span class="flex items-center gap-2">
+                            <span class="text-gray-400 tabular-nums" x-show="ingestStartTime" x-text="ingestElapsedText()"></span>
+                            <span class="font-semibold tabular-nums" :class="ingestPercent() >= 100 ? 'text-green-400' : 'text-strong'"
+                                x-text="Math.round(ingestPercent()) + '%'"></span>
+                        </span>
+                    </div>
+                    <div class="h-2 rounded-full bg-white/10 overflow-hidden">
+                        <div class="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-500"
+                            :style="'width:' + ingestPercent() + '%'"></div>
+                    </div>
+                    <div class="flex items-center justify-between mt-2">
+                        <span x-show="ingestStalled" class="text-amber-400 text-xs">⚠ 已超过 60 秒无进展，可能卡住 — 可取消后重试</span>
+                        <span class="text-xs"></span>
+                        <button x-show="ingestProgress.running" @click="cancelIngest()" class="text-xs text-red-400 hover:text-red-300 underline">
+                            取消导入
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <template x-if="ingestResult">
-                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 fade-in">
-                    <h3 class="font-medium mb-2" :class="ingestResult.status === 'ok' ? 'text-green-400' : 'text-red-400'">
-                        <span x-text="ingestResult.status === 'ok' ? '✅ 导入成功' : '❌ 导入失败'"></span>
+                <div class="glass-card rounded-2xl p-6 fade-in">
+                    <h3 class="font-medium mb-2" :class="ingestResult.status === 'ok' ? 'text-green-400' : ingestResult.status === 'cancelled' ? 'text-amber-400' : ingestResult.status === 'busy' ? 'text-amber-400' : 'text-red-400'">
+                        <span x-text="ingestResult.status === 'ok' ? '✅ 导入成功' : ingestResult.status === 'cancelled' ? '⏹ 导入已取消' : ingestResult.status === 'busy' ? '⏳ 已有导入在进行中' : '❌ 导入失败'"></span>
                     </h3>
                     <template x-if="ingestResult.status !== 'ok'">
-                        <p class="text-sm text-red-400" x-text="'错误: ' + (ingestResult.error || '未知')"></p>
+                        <p class="text-sm" :class="ingestResult.status === 'cancelled' || ingestResult.status === 'busy' ? 'text-amber-400' : 'text-red-400'"
+                            x-text="ingestResult.status === 'cancelled' ? '本次导入已中止，可重新发起。' : ingestResult.status === 'busy' ? (ingestResult.error || '请先等待当前导入完成或取消后再试。') : '错误: ' + (ingestResult.error || '未知')"></p>
                     </template>
                     <template x-if="ingestResult.status === 'ok'">
                         <div class="text-sm text-gray-400 space-y-1">
                             <p>
-                                新增 <span class="text-white" x-text="ingestResult.added"></span> ·
-                                更新 <span class="text-white" x-text="ingestResult.updated"></span> ·
-                                跳过 <span class="text-white" x-text="ingestResult.unchanged"></span> ·
-                                删除 <span class="text-white" x-text="ingestResult.deleted"></span>
+                                新增 <span class="text-strong" x-text="ingestResult.added"></span> ·
+                                更新 <span class="text-strong" x-text="ingestResult.updated"></span> ·
+                                跳过 <span class="text-strong" x-text="ingestResult.unchanged"></span> ·
+                                删除 <span class="text-strong" x-text="ingestResult.deleted"></span>
                             </p>
-                            <p>实际写入分块: <span class="text-white" x-text="ingestResult.chunks"></span></p>
+                            <p>实际写入分块: <span class="text-strong" x-text="ingestResult.chunks"></span></p>
                         </div>
                     </template>
                 </div>
@@ -245,15 +333,76 @@
         </div>
     </div>
 
+    <!-- Manage Tab -->
+    <div x-show="activeTab === 'manage'" class="flex-1 overflow-y-auto px-6 py-6">
+        <div class="max-w-2xl mx-auto space-y-6">
+            <div class="glass-card rounded-2xl p-6 lift">
+                <h2 class="text-lg font-semibold mb-4">知识库管理</h2>
+                <div class="flex items-center gap-2 mb-5 pb-5 border-b border-gray-700 text-sm">
+                    <span class="text-gray-400">新建集合</span>
+                    <div class="input-wrap">
+                        <input x-model="newCollectionName" type="text" placeholder="集合名"
+                               class="input-field with-ico rounded px-2 py-1 text-xs w-44 placeholder-gray-500">
+                        <svg class="ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                    </div>
+                    <button @click="createCollection()" :disabled="collectionSwitching || !newCollectionName.trim()"
+                            class="btn-send disabled:opacity-50 text-white rounded px-3 py-1.5 text-xs">新建并切换</button>
+                </div>
+
+                <div class="space-y-2.5" x-show="collections.length">
+                    <template x-for="c in collections" :key="c">
+                        <div class="flex items-center gap-3 border border-gray-700/50 rounded-xl px-4 py-2.5"
+                             :class="c === currentCollection ? 'border-accent-1/40 bg-white/5' : ''">
+                            <span class="flex-1 truncate text-sm"
+                                  :class="c === currentCollection ? 'font-semibold text-strong' : 'text-gray-300'"
+                                  x-text="c"></span>
+                            <span x-show="c === currentCollection" class="badge-dim text-xs">当前</span>
+                            <button type="button" x-show="c !== currentCollection"
+                                @click="switchCollection(c)" :disabled="collectionSwitching"
+                                class="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-200 transition disabled:opacity-50">切换</button>
+                            <input x-model="renameDraft" :id="'renameInp' + c" type="text"
+                                x-show="renamingCollection === c" class="dd-input" style="width: 10rem;"
+                                :disabled="renameBusy"
+                                @click.stop
+                                @keydown.enter="commitRenameCollection(c)"
+                                @keydown.esc="renamingCollection = null; renameDraft = '';"
+                                @blur="commitRenameCollection(c)">
+                            <button type="button" @click.stop="startRenameCollection(c)" class="dd-rename" title="重命名集合">改名</button>
+                            <button type="button" @click.stop="deleteCollection(c)" class="dd-delete" title="删除集合">删除</button>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="!collections.length" class="text-gray-500 text-sm text-center py-8">暂无集合，请先在下方新建</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Status Tab -->
     <div x-show="activeTab === 'status'" class="flex-1 overflow-y-auto px-6 py-6">
         <div class="max-w-2xl mx-auto space-y-6">
-            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <div class="glass-card rounded-2xl p-6">
                 <h2 class="text-lg font-semibold mb-4">知识库状态</h2>
                 <div class="space-y-3 text-sm">
-                    <div class="flex justify-between py-2 border-b border-gray-700">
+                    <div class="flex justify-between py-2 border-b border-gray-700 items-center">
                         <span class="text-gray-400">集合名称</span>
-                        <span x-text="statusInfo.collection || '-'"></span>
+                        <div class="relative" @click.outside="collectionOpen = false">
+                            <button type="button" @click="collectionOpen = !collectionOpen"
+                                :class="collectionOpen ? 'dd-trigger open' : 'dd-trigger'">
+                                <span class="dd-label" x-text="statusInfo.collection || '-'"></span>
+                                <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                            </button>
+                            <template x-if="collectionOpen">
+                                <div class="dd-panel">
+                                    <template x-for="c in collections" :key="c">
+                                        <button type="button" @click="switchCollection(c); collectionOpen = false"
+                                            class="dd-item" :class="c === statusInfo.collection ? 'on' : ''">
+                                            <span x-text="c"></span>
+                                            <span x-show="c === statusInfo.collection">✓</span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                     <div class="flex justify-between py-2 border-b border-gray-700">
                         <span class="text-gray-400">向量数量</span>
@@ -266,7 +415,7 @@
                 </div>
             </div>
 
-            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <div class="glass-card rounded-2xl p-6">
                 <h2 class="text-lg font-semibold mb-4">配置信息</h2>
                 <div class="space-y-3 text-sm">
                     <div class="flex justify-between py-2 border-b border-gray-700">
@@ -296,7 +445,7 @@
                 </div>
             </div>
 
-            <button @click="loadStatus(); loadConfig()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+            <button @click="loadStatus(); loadConfig()" class="btn-ghost text-white px-4 py-2 rounded-lg text-sm">
                 🔄 刷新
             </button>
         </div>
@@ -309,7 +458,7 @@
             <!-- Detail View -->
             <div x-show="restoringImport" class="text-gray-400 text-sm">正在加载导入详情…</div>
             <div x-show="selectedSession" class="fade-in">
-                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <div class="glass-card rounded-2xl p-6">
                     <button @click="backToImports()" class="text-sm text-gray-400 hover:text-white mb-4">← 返回列表</button>
                     <h2 class="text-lg font-semibold mb-4">导入详情 #<span x-text="selectedSession.id"></span></h2>
                     <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mb-4">
@@ -330,7 +479,7 @@
                     <h3 class="font-medium mb-2">本次导入文件 <span class="text-gray-500 text-xs" x-text="'新增 ' + selectedSession.added + ' / 更新 ' + selectedSession.updated + ' / 未变 ' + selectedSession.unchanged + ' / 删除 ' + selectedSession.deleted"></span></h3>
                     <div class="max-h-60 overflow-y-auto border border-gray-700 rounded-lg mb-5">
                         <table class="w-full text-sm">
-                            <thead class="text-left text-gray-400 bg-gray-900 sticky top-0">
+                            <thead class="text-left text-gray-400 thead-glass sticky top-0">
                                 <tr>
                                     <th class="py-2 px-3">文件</th>
                                     <th class="py-2 px-3 w-20">状态</th>
@@ -354,7 +503,7 @@
                     <h3 class="font-medium mb-2">导入后全部文档 <span class="text-gray-500 text-xs" x-text="'(' + selectedSession.snapshot_files.length + ' 个, 共 ' + selectedSession.total_chunks + ' 分块)'"></span></h3>
                     <div class="max-h-60 overflow-y-auto border border-gray-700 rounded-lg">
                         <table class="w-full text-sm">
-                            <thead class="text-left text-gray-400 bg-gray-900 sticky top-0">
+                            <thead class="text-left text-gray-400 thead-glass sticky top-0">
                                 <tr>
                                     <th class="py-2 px-3">文件</th>
                                     <th class="py-2 px-3 w-16">分块</th>
@@ -375,19 +524,44 @@
 
             <!-- List View -->
             <template x-if="!selectedSession && !restoringImport">
-                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <div class="glass-card rounded-2xl p-6">
                     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
                         <h2 class="text-lg font-semibold">导入记录</h2>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <div class="flex items-center gap-1.5 text-xs text-gray-400">
+                                <span class="badge-dim">集合</span>
+                                <div class="relative" @click.outside="importCollOpen = false">
+                                    <button type="button" @click="importCollOpen = !importCollOpen"
+                                        :class="importCollOpen ? 'dd-trigger open' : 'dd-trigger'">
+                                        <span class="dd-label" x-text="importCollection || currentCollection"></span>
+                                        <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                    </button>
+                                    <template x-if="importCollOpen">
+                                        <div class="dd-panel">
+                                            <template x-for="c in collections" :key="c">
+                                                <button type="button"
+                                                    @click="importCollection = c; importCollOpen = false; loadImports()"
+                                                    class="dd-item" :class="importCollection === c ? 'on' : ''">
+                                                    <span class="truncate" x-text="c"></span>
+                                                    <span x-show="importCollection === c">✓</span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="input-wrap">
                             <input
                                 x-model="importSearch"
                                 @keyup.enter="loadImports()"
                                 type="text"
                                 placeholder="按路径搜索..."
-                                class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-400 w-52"
+                                class="input-field with-ico rounded-lg px-3 py-2 text-sm placeholder-gray-400 w-52"
                             >
-                            <button @click="loadImports()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">🔍 搜索</button>
-                            <button @click="importSearch = ''; loadImports()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">🔄 刷新</button>
+                            <svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                        </div>
+                            <button @click="loadImports()" class="btn-ghost text-white px-3 py-2 rounded-lg text-sm">搜索</button>
+                            <button @click="importCollection = (importCollection || currentCollection); importSearch = ''; loadImports()" class="btn-ghost text-white px-3 py-2 rounded-lg text-sm">🔄 刷新</button>
                         </div>
                     </div>
                     <template x-if="importSessions.length === 0">
@@ -410,7 +584,7 @@
                                 </thead>
                                 <tbody>
                                     <template x-for="s in importSessions" :key="s.id">
-                                        <tr @click="viewSession(s.id)" class="border-t border-gray-700 hover:bg-gray-700 cursor-pointer transition-colors">
+                                        <tr @click="viewSession(s.id)" class="border-t border-gray-700 hover:bg-white/5 cursor-pointer transition-colors">
                                             <td class="py-2 pr-3 text-gray-500" x-text="s.id"></td>
                                             <td class="py-2 pr-3" x-text="s.ts"></td>
                                             <td class="py-2 pr-3 font-mono text-xs max-w-[16rem] break-all" x-text="shortPath(s.path)" :title="s.path"></td>
@@ -434,7 +608,7 @@
 
     <!-- Source Modal -->
     <div x-show="sourceModal.open" class="modal-backdrop" @click.self="closeSource()">
-        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-2xl max-h-[80vh] flex flex-col fade-in">
+        <div class="modal-card w-full max-w-2xl max-h-[80vh] flex flex-col fade-in">
             <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
                 <div class="flex items-center gap-2 text-sm">
                     <span class="text-gray-400">来源: </span>
@@ -448,7 +622,7 @@
     </div>
     <!-- File Modal -->
     <div x-show="fileModal.open" class="modal-backdrop" @click.self="closeFile()">
-        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-3xl max-h-[85vh] flex flex-col fade-in">
+        <div class="modal-card w-full max-w-3xl max-h-[85vh] flex flex-col fade-in">
             <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
                 <div class="flex items-center gap-2 text-sm min-w-0">
                     <span class="text-gray-400 shrink-0">文件: </span>
@@ -466,18 +640,56 @@
 function app() {
     const savedTab = sessionStorage.getItem('ragTab');
     return {
-        activeTab: ['chat', 'ingest', 'status', 'imports'].includes(savedTab) ? savedTab : 'chat',
+        theme: (function () { try { return localStorage.getItem('ragTheme') || 'default'; } catch (e) { return 'default'; } })(),
+        themeOptions: [
+            { id: 'default', name: '蓝青', grad: 'linear-gradient(135deg,#3b82f6,#22d3ee)' },
+            { id: 'purple', name: '紫罗兰', grad: 'linear-gradient(135deg,#8b5cf6,#d946ef)' },
+            { id: 'emerald', name: '翠绿', grad: 'linear-gradient(135deg,#10b981,#14b8a6)' },
+            { id: 'amber', name: '暖橙', grad: 'linear-gradient(135deg,#f59e0b,#f43f5e)' },
+            { id: 'light', name: '明亮', grad: 'linear-gradient(135deg,#0f172a 35%,#f8fafc 90%)' },
+        ],
+        activeTab: ['chat', 'ingest', 'manage', 'status', 'imports'].includes(savedTab) ? savedTab : 'chat',
         question: '',
-        messages: [],
+        chatSessions: (() => {
+            try {
+                const raw = localStorage.getItem('ragChatSessions');
+                const arr = raw ? JSON.parse(raw) : null;
+                if (Array.isArray(arr) && arr.length) {
+                    return arr.map((s) => ({
+                        id: s.id,
+                        title: s.title || '会话',
+                        collection: s.collection || '',
+                        messages: Array.isArray(s.messages) ? s.messages : [],
+                    }));
+                }
+            } catch (e) {}
+            return [{ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), title: '会话 1', collection: '', messages: [] }];
+        })(),
+        activeChatId: null,
+        chatCollOpenFor: null,
+        editChatId: null,
+        editChatName: '',
         loading: false,
 
         ingestRecreate: false,
         ingestDeleteMissing: true,
         ingestLoading: false,
         ingestResult: null,
+        ingestProgress: { running: false, phase: '', done: 0, total: 0 },
+        ingestPollTimer: null,
+        ingestElapsedTimer: null,
+        ingestNow: 0,
+        ingestStartTime: null,
+        ingestStalled: false,
+        lastProgressKey: null,
+        lastProgressTs: 0,
         fsItems: [],
+        fsExpanded: {},
+        fsExpandCache: (() => {
+            try { return JSON.parse(localStorage.getItem('ragFsExpand') || '{}'); }
+            catch (e) { return {}; }
+        })(),
         fsTreeRows: [],
-        fsCollapsed: {},
         dirFiles: {},
         selected: {},
         missingFiles: [],
@@ -495,6 +707,12 @@ function app() {
         currentCollection: '',
         newCollectionName: '',
         collectionSwitching: false,
+        collectionOpen: false,
+        renamingCollection: null,
+        renameDraft: '',
+        renameBusy: false,
+        importCollection: '',
+        importCollOpen: false,
 
         statusInfo: {},
         configInfo: {},
@@ -519,10 +737,33 @@ function app() {
             const sid = sessionStorage.getItem('ragImportSession');
             this.restoringImport = !!(sid && sessionStorage.getItem('ragTab') === 'imports');
             await this.loadCollections();
+            this.ensureChat();
+            this.restoreFsExpand();
             await Promise.all([this.loadStatus(), this.loadConfig(), this.loadFiles(), this.loadImports()]);
+            await this.resumeIngestIfRunning();
             if (this.restoringImport) {
                 await this.viewSession(sid);
                 this.restoringImport = false;
+            }
+        },
+
+        async resumeIngestIfRunning() {
+            try {
+                const res = await fetch('/api/ingest/progress');
+                const p = await res.json();
+                if (p && p.running) {
+                    this.ingestLoading = true;
+                    this.ingestResult = null;
+                    this.ingestStartTime = p.started_at ? p.started_at * 1000 : Date.now();
+                    this.ingestNow = Date.now();
+                    this.ingestStalled = false;
+                    this.lastProgressKey = p.phase + ':' + p.done + ':' + p.total;
+                    this.lastProgressTs = Date.now();
+                    this.ingestProgress = p;
+                    this.startIngestPoll();
+                }
+            } catch (e) {
+                /* 忽略瞬时错误 */
             }
         },
 
@@ -530,6 +771,107 @@ function app() {
             sessionStorage.setItem('ragTab', tab);
             this.activeTab = tab;
             if (tab === 'imports') this.loadImports();
+        },
+
+        activeSession() {
+            return this.chatSessions.find((s) => s.id === this.activeChatId)
+                || this.chatSessions[0]
+                || { id: null, title: '会话', collection: '', messages: [] };
+        },
+
+        dirDotStyle(row) {
+            if (!row.isDir || row.total <= 0 || row.imported === 0 || row.imported >= row.total) return '';
+            const pct = Math.min(row.imported / row.total, 1);
+            return 'background: conic-gradient(#22c55e ' + (pct * 360) + 'deg, #eab308 0)';
+        },
+
+        dirDotTitle(row) {
+            const pct = row.total ? Math.round((row.imported / row.total) * 100) : 0;
+            return '已导入 ' + row.imported + '/' + row.total + ' (' + pct + '%)';
+        },
+
+        dirTailLabel(row) {
+            const base = row.imported + '/' + row.total;
+            if (row.total && row.imported > 0 && row.imported < row.total) {
+                return base + ' (' + Math.round((row.imported / row.total) * 100) + '%)';
+            }
+            return base;
+        },
+
+        startRename(s) {
+            this.editChatId = s.id;
+            this.editChatName = s.title;
+            this.$nextTick(() => {
+                const el = document.getElementById('chatRen' + s.id);
+                if (el) { el.focus(); el.select(); }
+            });
+        },
+
+        commitRename(s) {
+            if (this.editChatId !== s.id) return;
+            const name = (this.editChatName || '').trim();
+            s.title = name || s.title || '会话';
+            this.editChatId = null;
+            this.editChatName = '';
+            this.saveChatSessions();
+        },
+
+        saveChatSessions() {
+            try { localStorage.setItem('ragChatSessions', JSON.stringify(this.chatSessions)); } catch (e) {}
+        },
+
+        ensureChat() {
+            if (!this.chatSessions.length) {
+                this.chatSessions.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), title: '会话 1', collection: '', messages: [] });
+            }
+            if (this.activeChatId == null || !this.chatSessions.some((s) => s.id === this.activeChatId)) {
+                this.activeChatId = this.chatSessions[0].id;
+            }
+            for (const s of this.chatSessions) {
+                if (!s.collection || (this.collections.length && !this.collections.includes(s.collection))) {
+                    s.collection = this.currentCollection || '';
+                }
+            }
+            this.saveChatSessions();
+        },
+
+        newChat() {
+            let n = this.chatSessions.length + 1;
+            const titles = new Set(this.chatSessions.map((s) => s.title));
+            while (titles.has('会话 ' + n)) n++;
+            const s = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), title: '会话 ' + n, collection: this.currentCollection || '', messages: [] };
+            this.chatSessions.push(s);
+            this.activeChatId = s.id;
+            this.saveChatSessions();
+            this.scrollChatBottom();
+        },
+
+        deleteChat(id) {
+            const i = this.chatSessions.findIndex((s) => s.id === id);
+            if (i < 0) return;
+            this.chatSessions.splice(i, 1);
+            if (this.activeChatId === id) {
+                const next = this.chatSessions[i] || this.chatSessions[i - 1] || this.chatSessions[0];
+                this.activeChatId = next ? next.id : null;
+            }
+            if (!this.chatSessions.length) this.newChat();
+            this.saveChatSessions();
+            this.scrollChatBottom();
+        },
+
+        switchChat(id) {
+            if (this.activeChatId === id || !this.chatSessions.some((s) => s.id === id)) return;
+            this.activeChatId = id;
+            this.question = '';
+            this.saveChatSessions();
+            this.scrollChatBottom();
+        },
+
+        scrollChatBottom() {
+            this.$nextTick(() => {
+                const box = this.$refs.chatBox;
+                if (box) box.scrollTop = box.scrollHeight;
+            });
         },
 
         async loadCollections() {
@@ -561,7 +903,9 @@ function app() {
                 this.currentCollection = data.current || '';
                 this.selected = {};
                 this.newCollectionName = '';
-                this.fsCollapsed = {};
+                this.saveFsExpand();
+                this.fsExpanded = {};
+                this.restoreFsExpand();
                 await this.loadFiles();
                 await this.loadImports();
                 await this.loadStatus();
@@ -579,22 +923,118 @@ function app() {
             await this.switchCollection(name);
         },
 
+        startRenameCollection(name) {
+            this.renamingCollection = name;
+            this.renameDraft = name;
+            this.$nextTick(() => {
+                const el = document.getElementById('renameInp' + name);
+                if (el) { el.focus(); el.select(); }
+            });
+        },
+
+        async commitRenameCollection(oldName) {
+            const name = (this.renameDraft || '').trim();
+            if (this.renameBusy) return;
+            if (!name || name === oldName) {
+                this.renamingCollection = null;
+                this.renameDraft = '';
+                return;
+            }
+            this.renamingCollection = null;
+            this.renameDraft = '';
+            const data = await this.renameCollection(oldName, name);
+            if (!data) return;
+            for (const s of this.chatSessions) {
+                if (s.collection === oldName) s.collection = name;
+            }
+            if ((this.statusInfo.collection || '') === oldName) this.statusInfo.collection = name;
+            if (this.importCollection === oldName) {
+                this.importCollection = name;
+                this.loadImports();
+            }
+            this.saveChatSessions();
+        },
+
+        async deleteCollection(name) {
+            if (this.renameBusy) return;
+            if (!window.confirm('确定删除集合「' + name + '」？该集合的全部分块与导入记录将被永久删除，不可恢复。')) return;
+            this.renameBusy = true;
+            try {
+                const res = await fetch('/api/collections/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '删除失败');
+                }
+                const data = await res.json();
+                this.collections = data.collections || [];
+                this.currentCollection = data.current || '';
+                if (this.importCollection === name) this.importCollection = '';
+                if ((this.statusInfo.collection || '') === name) this.statusInfo.collection = '';
+                for (const s of this.chatSessions) {
+                    if (s.collection === name) s.collection = '';
+                }
+                this.saveChatSessions();
+                await this.loadImports();
+                await this.loadStatus();
+                await this.loadFiles();
+            } catch (e) {
+                console.error(e);
+                alert(e.message);
+            } finally {
+                this.renameBusy = false;
+            }
+        },
+
+        async renameCollection(oldName, newName) {
+            this.renameBusy = true;
+            try {
+                const res = await fetch('/api/collections/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: oldName, new_name: newName }),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '重命名失败');
+                }
+                const data = await res.json();
+                this.collections = data.collections || [];
+                this.currentCollection = data.current || '';
+                return data;
+            } catch (e) {
+                console.error(e);
+                alert(e.message);
+                return null;
+            } finally {
+                this.renameBusy = false;
+            }
+        },
+
         async sendQuery() {
             const q = this.question.trim();
             if (!q || this.loading) return;
 
-            this.messages.push({ role: 'user', content: q });
+            const sess = this.activeSession();
+            sess.messages.push({ role: 'user', content: q });
             this.question = '';
             this.loading = true;
 
-            this.messages.push({ role: 'assistant', content: '', sources: [], retrieved: [], question: q });
-            const idx = this.messages.length - 1;
+            sess.messages.push({ role: 'assistant', content: '', sources: [], retrieved: [], question: q });
+            const idx = sess.messages.length - 1;
 
             try {
                 const res = await fetch('/api/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: q, top_k: this.configInfo.top_k || 3 }),
+                    body: JSON.stringify({
+                        question: q,
+                        top_k: this.configInfo.top_k || 3,
+                        collection: sess.collection || undefined,
+                    }),
                 });
 
                 const reader = res.body.getReader();
@@ -614,31 +1054,36 @@ function app() {
                         try {
                             const event = JSON.parse(line.slice(6));
                             if (event.type === 'chunk') {
-                                this.messages[idx].content += event.text;
+                                sess.messages[idx].content += event.text;
                             } else if (event.type === 'done') {
-                                this.messages[idx].sources = event.sources || [];
-                                this.messages[idx].retrieved = event.retrieved || [];
-                                if (event.answer && !this.messages[idx].content) {
-                                    this.messages[idx].content = event.answer;
+                                sess.messages[idx].sources = event.sources || [];
+                                sess.messages[idx].retrieved = event.retrieved || [];
+                                if (event.answer && !sess.messages[idx].content) {
+                                    sess.messages[idx].content = event.answer;
                                 }
                             }
                         } catch {}
                     }
                 }
             } catch (e) {
-                this.messages[idx].content = '请求失败: ' + e.message;
+                sess.messages[idx].content = '请求失败: ' + e.message;
             }
 
             this.loading = false;
-            this.$nextTick(() => {
-                const box = this.$refs.chatBox;
-                if (box) box.scrollTop = box.scrollHeight;
-            });
+            this.saveChatSessions();
+            this.scrollChatBottom();
         },
 
         async runIngest(paths) {
             this.ingestLoading = true;
             this.ingestResult = null;
+            this.ingestStartTime = Date.now();
+            this.ingestNow = Date.now();
+            this.ingestStalled = false;
+            this.lastProgressKey = null;
+            this.lastProgressTs = 0;
+            this.ingestProgress = { running: true, phase: '', done: 0, total: 0 };
+            this.startIngestPoll();
             try {
                 const res = await fetch('/api/ingest', {
                     method: 'POST',
@@ -650,6 +1095,19 @@ function app() {
                     }),
                 });
                 this.ingestResult = await res.json();
+                if (this.ingestResult.status === 'busy') {
+                    try {
+                        const p = await (await fetch('/api/ingest/progress')).json();
+                        if (p && p.running) {
+                            this.ingestProgress = p;
+                            this.ingestStartTime = p.started_at ? p.started_at * 1000 : Date.now();
+                            this.ingestNow = Date.now();
+                        }
+                    } catch (e) { /* 忽略 */ }
+                    this.ingestLoading = true;
+                    return;
+                }
+                this.ingestProgress = { running: false, phase: 'done', done: 1, total: 1 };
                 this.selected = {};
                 await this.loadStatus();
                 await this.loadFiles();
@@ -657,12 +1115,121 @@ function app() {
                 this.ingestResult = { status: 'error', error: e.message };
             }
             this.ingestLoading = false;
+            this.stopIngestPoll();
         },
 
         async doIngest() {
             const paths = Object.keys(this.selected);
             if (!paths.length) return;
             await this.runIngest(paths);
+        },
+
+        startIngestPoll() {
+            this.stopIngestPoll();
+            const tick = async () => {
+                try {
+                    const res = await fetch('/api/ingest/progress');
+                    if (!res.ok) return;
+                    const p = await res.json();
+                    this.ingestProgress = p;
+                    if (p.running) {
+                        const key = p.phase + ':' + p.done + ':' + p.total;
+                        if (key === this.lastProgressKey) {
+                            if (Date.now() - this.lastProgressTs > 60000) this.ingestStalled = true;
+                        } else {
+                            this.lastProgressKey = key;
+                            this.lastProgressTs = Date.now();
+                            this.ingestStalled = false;
+                        }
+                    } else if (this.ingestPollTimer) {
+                        const terminal = p.phase === 'done' || p.phase === 'cancelled' || p.phase === 'error';
+                        const sameRun = p.started_at && this.ingestStartTime
+                            && Math.abs(p.started_at * 1000 - this.ingestStartTime) < 2000;
+                        if (!terminal || !sameRun) return;
+                        const s = p.summary || {};
+                        this.ingestLoading = false;
+                        this.stopIngestPoll();
+                        this.ingestResult = {
+                            status: p.phase === 'done' ? 'ok' : (p.phase === 'cancelled' ? 'cancelled' : 'error'),
+                            documents: s.documents || 0,
+                            chunks: s.chunks || 0,
+                            added: s.added || 0,
+                            updated: s.updated || 0,
+                            unchanged: s.unchanged || 0,
+                            deleted: s.deleted || 0,
+                            error: p.phase === 'error' ? (s.error || '导入过程中发生错误') : null,
+                        };
+                        if (p.phase === 'done') this.selected = {};
+                        await this.loadStatus();
+                        await this.loadFiles();
+                    }
+                } catch (e) {
+                    /* ignore transient errors */
+                }
+            };
+            this.ingestPollTimer = setInterval(tick, 500);
+            this.ingestElapsedTimer = setInterval(() => {
+                this.ingestNow = Date.now();
+            }, 1000);
+            tick();
+        },
+
+        stopIngestPoll() {
+            if (this.ingestPollTimer) {
+                clearInterval(this.ingestPollTimer);
+                this.ingestPollTimer = null;
+            }
+            if (this.ingestElapsedTimer) {
+                clearInterval(this.ingestElapsedTimer);
+                this.ingestElapsedTimer = null;
+            }
+        },
+
+        ingestElapsedText() {
+            if (!this.ingestStartTime) return '';
+            const s = Math.floor((this.ingestNow - this.ingestStartTime) / 1000);
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return '已用 ' + (m > 0 ? m + '分' : '') + sec + '秒';
+        },
+
+        async cancelIngest() {
+            try {
+                const rid = this.ingestStartTime ? Math.round(this.ingestStartTime / 1000) : null;
+                await fetch('/api/ingest/cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(rid ? { run_id: rid } : {}),
+                });
+                this.ingestStalled = false;
+            } catch (e) {
+                /* ignore */
+            }
+        },
+
+        ingestPercent() {
+            const p = this.ingestProgress || {};
+            if (!p.running && p.phase === 'done') return 100;
+            if (p.phase === 'embed' && p.total > 0) {
+                return Math.min(90, 10 + 80 * (p.done / p.total));
+            }
+            if (p.phase === 'upsert') return 92;
+            if (p.phase === 'chunk') return 10;
+            if (p.phase === 'read') return 5;
+            return 0;
+        },
+
+        ingestStageText() {
+            const p = this.ingestProgress || {};
+            if (p.phase === 'read') return '读取文件…';
+            if (p.phase === 'chunk') return '分块中…';
+            if (p.phase === 'embed') {
+                if (p.total > 0) return '向量化 ' + Math.round((p.done / p.total) * 100) + '%…';
+                return '向量化…';
+            }
+            if (p.phase === 'upsert') return '写入索引…';
+            if (p.phase === 'done') return '完成';
+            return '准备中…';
         },
 
         startFsResize(e) {
@@ -700,7 +1267,6 @@ function app() {
                 this.fsItems = data.items || [];
                 this.missingFiles = (data.missing || []).map(m => m.filename);
                 this.fsSummary = data.summary || { total: 0, imported: 0, unimported: 0 };
-                this.fsCollapsed = {};
                 this.rebuildTree();
             } catch {}
         },
@@ -769,10 +1335,10 @@ function app() {
                 if (q && !searchKeep.has(rel)) return;
                 rows.push({
                     name: node.name, rel, depth, isDir: node.dir,
-                    expanded: !q ? !this.fsCollapsed[rel] : true,
+                    expanded: !q ? !!this.fsExpanded[rel] : true,
                     imported: node.imported, total: node.total, file: node.file,
                 });
-                if (node.dir && (q || !this.fsCollapsed[rel])) {
+                if (node.dir && (q || this.fsExpanded[rel])) {
                     for (const [kname, kchild] of node.children) {
                         emit(kchild, rel + '/' + kname, depth + 1);
                     }
@@ -783,9 +1349,27 @@ function app() {
         },
 
         toggleExpand(rel) {
-            if (this.fsCollapsed[rel]) delete this.fsCollapsed[rel];
-            else this.fsCollapsed[rel] = true;
+            if (this.fsExpanded[rel]) delete this.fsExpanded[rel];
+            else this.fsExpanded[rel] = true;
+            this.saveFsExpand();
             this.rebuildTree();
+        },
+
+        saveFsExpand() {
+            try {
+                const cache = JSON.parse(localStorage.getItem('ragFsExpand') || '{}');
+                cache[this.currentCollection] = Object.keys(this.fsExpanded);
+                localStorage.setItem('ragFsExpand', JSON.stringify(cache));
+                this.fsExpandCache = cache;
+            } catch (e) {}
+        },
+
+        restoreFsExpand() {
+            this.fsExpanded = {};
+            const cache = this.fsExpandCache || {};
+            for (const rel of (cache[this.currentCollection] || [])) {
+                this.fsExpanded[rel] = true;
+            }
         },
 
         dirSelState(rel) {
@@ -836,10 +1420,17 @@ function app() {
             try {
                 const params = new URLSearchParams();
                 if (this.importSearch.trim()) params.set('q', this.importSearch.trim());
+                const col = this.importCollection || this.currentCollection;
+                if (col) params.set('collection', col);
                 const res = await fetch('/api/imports?' + params.toString());
                 const data = await res.json();
                 this.importSessions = data.sessions || [];
             } catch {}
+        },
+
+        applyTheme() {
+            document.documentElement.dataset.theme = this.theme;
+            try { localStorage.setItem('ragTheme', this.theme); } catch (e) {}
         },
 
         async viewSession(id) {
@@ -958,15 +1549,56 @@ function app() {
             return head + '…' + tail;
         },
 
-        renderMarkdown(text) {
+        renderMarkdown(text, question) {
             if (!text) return '';
             let html = text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
+                .replace(/>/g, '&gt;');
+
+            if (question) {
+                const tokens = [];
+                const add = t => {
+                    if (!t || t.length < 2 || tokens.indexOf(t) !== -1) return;
+                    tokens.push(t);
+                };
+                const textLower = html.toLowerCase();
+                const re = /[a-zA-Z0-9]+|[\u4e00-\u9fff]+/g;
+                let m;
+                while ((m = re.exec(question)) !== null) {
+                    const tok = m[0];
+                    if (/^[\u4e00-\u9fff]+$/.test(tok)) {
+                        const covered = new Array(tok.length).fill(false);
+                        for (let len = Math.min(tok.length, 20); len >= 2; len--) {
+                            for (let i = 0; i + len <= tok.length; i++) {
+                                if (covered.slice(i, i + len).some(Boolean)) continue;
+                                const sub = tok.slice(i, i + len);
+                                if (!textLower.includes(sub.toLowerCase())) continue;
+                                add(sub);
+                                for (let j = i; j < i + len; j++) covered[j] = true;
+                            }
+                        }
+                    } else if (textLower.includes(tok.toLowerCase())) {
+                        add(tok);
+                    }
+                }
+                if (tokens.length) {
+                    tokens.sort((a, b) => b.length - a.length);
+                    const kept = [];
+                    for (const t of tokens) {
+                        if (!kept.some(k => k.toLowerCase().indexOf(t.toLowerCase()) !== -1)) kept.push(t);
+                    }
+                    const pattern = kept.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+                    try {
+                        html = html.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark class="hl">$1</mark>');
+                    } catch (e) {}
+                }
+            }
+
+            html = html
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                .replace(/`(.*?)`/g, '<code class="bg-gray-600 px-1 rounded text-xs">$1</code>')
+                .replace(/`(.*?)`/g, '<code class="code-inline">$1</code>')
                 .replace(/\n/g, '<br>');
             return html;
         },
