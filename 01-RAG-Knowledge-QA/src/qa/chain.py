@@ -52,8 +52,10 @@ def _chunk_details(chunks: list[RetrievedChunk]) -> list[dict]:
     ]
 
 
-def answer_question(question: str, top_k: int | None = None) -> dict:
-    chunks = search(question, top_k=top_k or settings.top_k)
+def answer_question(
+    question: str, top_k: int | None = None, collection_name: str | None = None
+) -> dict:
+    chunks = search(question, top_k=top_k or settings.top_k, collection_name=collection_name)
     if not chunks:
         return {
             "answer": "知识库中没有找到相关文档。",
@@ -86,9 +88,9 @@ def answer_question(question: str, top_k: int | None = None) -> dict:
 
 
 def answer_question_stream(
-    question: str, top_k: int | None = None
+    question: str, top_k: int | None = None, collection_name: str | None = None
 ) -> Generator[dict, None, None]:
-    chunks = search(question, top_k=top_k or settings.top_k)
+    chunks = search(question, top_k=top_k or settings.top_k, collection_name=collection_name)
     if not chunks:
         yield {
             "type": "done",
