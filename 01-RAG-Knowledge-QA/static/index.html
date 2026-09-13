@@ -42,8 +42,18 @@
                     </button>
                 </template>
             </div>
+            <select
+                x-show="llmModels.length > 0"
+                :value="configInfo.llm_model"
+                @change="switchModel($event.target.value)"
+                :disabled="modelBusy"
+                class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs max-w-[200px]">
+                <template x-for="m in llmModels" :key="m.name">
+                    <option :value="m.name" x-text="m.name"></option>
+                </template>
+            </select>
+            <span x-show="llmModels.length === 0" class="badge-dim" x-text="configInfo.llm_model ? configInfo.llm_model + ' (加载模型列表…)' : '加载中…'"></span>
             <span class="badge-dim" x-text="statusText"></span>
-            <span class="badge-dim" x-text="configText"></span>
         </div>
     </header>
 
@@ -424,18 +434,7 @@
                     </div>
                     <div class="flex justify-between py-2 border-b border-gray-700">
                         <span class="text-gray-400">LLM 模型</span>
-                        <select
-                            x-show="llmModels.length > 0"
-                            :value="configInfo.llm_model"
-                            @change="switchModel($event.target.value)"
-                            :disabled="modelBusy"
-                            class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-right max-w-[260px]">
-                            <template x-for="m in llmModels" :key="m.name">
-                                <option :value="m.name" x-text="m.name"></option>
-                            </template>
-                        </select>
-                        <span x-show="llmModels.length === 0" class="text-xs text-gray-500" x-text="configInfo.llm_model ? configInfo.llm_model + ' (加载模型列表…)' : '加载中…'"></span>
-                        <button @click="openModelPull()" class="text-xs text-blue-400 hover:text-blue-300 ml-2 shrink-0" :disabled="modelPull.busy || modelPull.progress.active">⬇ 下载</button>
+                        <span x-text="configInfo.llm_model || '-'"></span>
                     </div>
                     <div class="flex justify-between py-2 border-b border-gray-700">
                         <span class="text-gray-400">Chunk 大小</span>
@@ -645,63 +644,6 @@
         </div>
     </div>
 
-    <!-- Model Pull Modal -->
-    <div x-show="modelPull.open" class="modal-backdrop" @click.self="stopPullMonitor()">
-        <div class="modal-card w-full max-w-md fade-in">
-            <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700">
-                <span class="text-sm font-semibold">下载模型</span>
-                <button @click="stopPullMonitor()" class="text-gray-400 hover:text-white text-lg leading-none px-1">✕</button>
-            </div>
-            <div class="px-5 py-4 space-y-4">
-                <div>
-                    <label class="text-gray-400 text-xs block mb-1">模型名（用 <code class="text-gray-200">库/模型:标签</code> 或 <code class="text-gray-200">模型:标签</code>）</label>
-                    <input x-model="modelPull.name" @keyup.enter="startModelPull()" placeholder="例如 qwen3:8b"
-                        :disabled="modelPull.busy || modelPull.progress.active"
-                        class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm outline-none focus:border-blue-500">
-                    <div class="flex gap-2 mt-2 flex-wrap">
-                        <template x-for="preset in ['qwen3:8b', 'qwen3:14b', 'qwen2.5']" :key="preset">
-                            <button @click="modelPull.name = preset"
-                                :disabled="modelPull.busy || modelPull.progress.active"
-                                class="px-2 py-0.5 rounded-full border border-gray-600 text-xs text-gray-300 hover:border-blue-500 hover:text-blue-300"
-                                x-text="preset"></button>
-                        </template>
-                    </div>
-                </div>
-
-                <div x-show="modelPull.progress.active || modelPull.progress.done" class="space-y-2">
-                    <div class="flex justify-between text-xs text-gray-400">
-                        <span x-text="modelPull.progress.phase"></span>
-                        <span x-show="modelPull.progress.total > 0"
-                            x-text="fmtBytes(modelPull.progress.completed) + ' / ' + fmtBytes(modelPull.progress.total)"></span>
-                    </div>
-                    <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
-                        <div class="h-full bg-blue-500 transition-all duration-300"
-                            :style="'width:' + Math.min(100, modelPull.progress.pct) + '%'"></div>
-                    </div>
-                    <div class="text-right text-xs text-gray-400" x-text="modelPull.progress.pct.toFixed(1) + '%'"></div>
-                    <div x-show="modelPull.progress.error" class="text-xs text-red-400 break-all"
-                        x-text="'错误: ' + modelPull.progress.error"></div>
-                    <div x-show="modelPull.progress.phase === 'done'" class="text-xs text-green-400">✓ 下载完成，已自动设为当前模型</div>
-                </div>
-
-                <div class="flex gap-2 justify-end pt-1">
-                    <button x-show="!modelPull.busy && !modelPull.progress.active && !modelPull.progress.done"
-                        @click="startModelPull()" class="btn-primary px-4 py-1.5 rounded-lg text-sm">
-                        ⬇ 开始下载
-                    </button>
-                    <button x-show="modelPull.progress.active && !modelPull.busy"
-                        @click="stopPullMonitor()" class="btn-ghost px-4 py-1.5 rounded-lg text-sm text-gray-300">
-                        后台继续，关闭窗口
-                    </button>
-                    <button x-show="modelPull.busy || modelPull.progress.done"
-                        @click="stopPullMonitor()" class="btn-ghost px-4 py-1.5 rounded-lg text-sm text-gray-300">
-                        关闭
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
 </div>
 
 <script>
@@ -793,16 +735,11 @@ function app() {
 
         sourceModal: { open: false, filename: '', score: null, html: '' },
         fileModal: { open: false, filename: '', content: '' },
-        modelPull: { open: false, name: '', busy: false, progress: { active: false, done: false, phase: 'idle', pct: 0, completed: 0, total: 0, error: null } },
-        pullTimer: null,
         restoringImport: false,
 
         get statusText() {
             const n = this.statusInfo.points_count;
             return n ? `${n} 条记录` : '';
-        },
-        get configText() {
-            return this.configInfo.llm_model || '';
         },
 
         async init() {
@@ -813,7 +750,6 @@ function app() {
             this.restoreFsExpand();
             await Promise.all([this.loadStatus(), this.loadConfig(), this.loadModels(), this.loadFiles(), this.loadImports()]);
             await this.resumeIngestIfRunning();
-            await this.resumePullMonitor();
             if (this.restoringImport) {
                 await this.viewSession(sid);
                 this.restoringImport = false;
@@ -1519,104 +1455,6 @@ function app() {
             } finally {
                 this.modelBusy = false;
             }
-        },
-
-        fmtBytes(n) {
-            n = Number(n) || 0;
-            if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
-            if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
-            if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
-            return n + ' B';
-        },
-
-        openModelPull() {
-            this.modelPull.open = true;
-            this.modelPull.busy = false;
-            this.pollPullProgress(true);
-        },
-
-        async startModelPull() {
-            const name = (this.modelPull.name || '').trim();
-            if (!name) { alert('请输入模型名'); return; }
-            this.modelPull.busy = true;
-            this.modelPull.progress = { active: false, done: false, phase: 'starting', pct: 0, completed: 0, total: 0, error: null };
-            try {
-                const res = await fetch('/api/models/pull', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: name }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || ('下载启动失败: HTTP ' + res.status));
-                this.applyPullProgress(data);
-                this.pollPullProgress(true);
-            } catch (e) {
-                this.modelPull.progress.error = e.message;
-                this.modelPull.progress.phase = 'error';
-                alert(e.message);
-            } finally {
-                this.modelPull.busy = false;
-            }
-        },
-
-        applyPullProgress(p) {
-            if (!p) return;
-            this.modelPull.progress = {
-                model: this.modelPull.progress.model || p.model,
-                active: !!p.active,
-                done: !!p.done,
-                phase: p.phase || 'idle',
-                pct: Number(p.pct || 0),
-                completed: Number(p.completed || 0),
-                total: Number(p.total || 0),
-                error: p.error || null,
-            };
-        },
-
-        async pollPullProgress(loop) {
-            if (this.pullTimer) { clearInterval(this.pullTimer); this.pullTimer = null; }
-            try {
-                const res = await fetch('/api/models/pull/progress');
-                const data = await res.json();
-                if (data && data.model) this.applyPullProgress(data);
-                if (loop && (data.active || !data.done) && document.body.contains(this.$el)) {
-                    this.pullTimer = setInterval(async () => {
-                        try {
-                            const r = await fetch('/api/models/pull/progress');
-                            const d = await r.json();
-                            this.applyPullProgress(d);
-                            if (!d.active && d.done && !this.modelPull._notified) {
-                                this.modelPull._notified = true;
-                                clearInterval(this.pullTimer); this.pullTimer = null;
-                                await this.loadModels();
-                                if (d.error) {
-                                    alert('下载失败: ' + d.error);
-                                } else {
-                                    await this.switchModel(d.model);
-                                }
-                            }
-                        } catch {}
-                    }, 600);
-                }
-            } catch {}
-        },
-
-        async resumePullMonitor() {
-            try {
-                const res = await fetch('/api/models/pull/progress');
-                const d = await res.json();
-                if (d && d.active) {
-                    this.modelPull.open = true;
-                    this.applyPullProgress(d);
-                    this.pollPullProgress(true);
-                }
-            } catch {}
-        },
-
-        stopPullMonitor() {
-            if (this.pullTimer) { clearInterval(this.pullTimer); this.pullTimer = null; }
-            this.modelPull._notified = false;
-            this.modelPull.open = false;
         },
 
         async loadImports() {

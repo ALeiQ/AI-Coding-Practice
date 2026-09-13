@@ -22,8 +22,6 @@ from src.api.schemas import (
     IngestRequest,
     IngestResponse,
     ModelInfo,
-    ModelPullProgress,
-    ModelPullRequest,
     ModelSelectRequest,
     ModelsResponse,
     QueryRequest,
@@ -42,7 +40,6 @@ from src.ingest import progress as ingest_progress
 from src.ingest.loader import load_file
 from src.ingest.pipeline import ingest_paths
 from src.qa.chain import answer_question_stream
-from src.qa.model_pull import get_pull_progress, is_pull_active, start_pull, validate_model_name
 from src.qa.model_state import get_current_model, set_current_model
 from src.vectorstore.naming import (
     delete_alias,
@@ -241,24 +238,6 @@ async def select_model(req: ModelSelectRequest):
     models = [ModelInfo(name=m.get("name", ""), size=m.get("size")) for m in tags if m.get("name")]
     models.sort(key=lambda m: m.name)
     return ModelsResponse(models=models, current=get_current_model())
-
-
-@router.post("/models/pull", response_model=ModelPullProgress)
-async def pull_model(req: ModelPullRequest):
-    if is_pull_active():
-        raise HTTPException(status_code=409, detail="已有模型在下载，请等待完成")
-    invalid = validate_model_name(req.model)
-    if invalid:
-        raise HTTPException(status_code=400, detail=invalid)
-    result = start_pull(req.model)
-    if result == "busy":
-        raise HTTPException(status_code=409, detail="已有模型在下载，请等待完成")
-    return get_pull_progress()
-
-
-@router.get("/models/pull/progress", response_model=ModelPullProgress)
-async def pull_progress():
-    return get_pull_progress()
 
 
 @router.get("/files")
