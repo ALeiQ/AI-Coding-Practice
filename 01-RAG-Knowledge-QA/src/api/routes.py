@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas import (
+    CollectionRenameRequest,
     CollectionsResponse,
     CollectionSwitchRequest,
     ConfigResponse,
@@ -15,6 +18,7 @@ from src.api.schemas import (
     ImportListResponse,
     ImportSession,
     ImportSessionDetail,
+    IngestCancelRequest,
     IngestRequest,
     IngestResponse,
     QueryRequest,
@@ -23,16 +27,25 @@ from src.api.schemas import (
 from src.config import settings
 from src.imports.store import (
     collection_session_stats,
+    delete_collection_sessions,
     get_session,
     list_sessions,
     session_snapshot,
 )
 from src.imports.store import list_files as list_session_files
+from src.ingest import progress as ingest_progress
 from src.ingest.loader import load_file
 from src.ingest.pipeline import ingest_paths
 from src.qa.chain import answer_question_stream
+from src.vectorstore.naming import (
+    delete_alias,
+    display_name,
+    rename_display,
+    storage_for_display,
+)
 from src.vectorstore.store import (
     collection_info,
+    delete_collection,
     get_client,
     list_collections,
     set_active_collection,
@@ -40,12 +53,19 @@ from src.vectorstore.store import (
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger("rag")
 
 
 @router.post("/query")
 async def query(req: QueryRequest):
+    collection = (
+        storage_for_display(req.collection) if req.collection else settings.qdrant_collection
+    )
+
     def event_stream():
-        for event in answer_question_stream(req.question, top_k=req.top_k):
+        for event in answer_question_stream(
+            req.question, top_k=req.top_k, collection_name=collection
+        ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -53,15 +73,58 @@ async def query(req: QueryRequest):
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest):
+    if ingest_progress.snapshot()["running"]:
+        return IngestResponse(
+            status="busy",
+            documents=0,
+            chunks=0,
+            error="已有导入正在进行中，请等待完成或先取消",
+        )
     if req.paths:
         for_ingest = list(dict.fromkeys(req.paths))
     else:
         for_ingest = [req.path]
-    result = ingest_paths(
-        for_ingest, recreate=req.recreate, delete_missing=req.delete_missing
-    )
+    ingest_progress.begin()
+    try:
+        result = await run_in_threadpool(
+            ingest_paths,
+            for_ingest,
+            recreate=req.recreate,
+            delete_missing=req.delete_missing,
+            progress=ingest_progress.set_phase,
+        )
+    except Exception as exc:
+        cancelled = ingest_progress.is_cancelled()
+        ingest_progress.finish(
+            "cancelled" if cancelled else "error", 0, 0,
+            summary=None if cancelled else {"error": str(exc)},
+        )
+        if cancelled:
+            return IngestResponse(status="cancelled", documents=0, chunks=0, error="cancelled")
+        raise
     if "error" in result:
-        return IngestResponse(status="error", documents=0, chunks=0, error=result["error"])
+        cancelled = ingest_progress.is_cancelled() or result.get("error") == "cancelled"
+        ingest_progress.finish(
+            "cancelled" if cancelled else "error", 0, 0,
+            summary={"error": result["error"]},
+        )
+        return IngestResponse(
+            status="cancelled" if cancelled else "error",
+            documents=0,
+            chunks=0,
+            error=result["error"],
+        )
+    ingest_progress.finish(
+        "done", 1, 1,
+        summary={
+            "documents": result.get("documents", 0),
+            "chunks": result.get("chunks", 0),
+            "added": result.get("added", 0),
+            "updated": result.get("updated", 0),
+            "unchanged": result.get("unchanged", 0),
+            "deleted": result.get("deleted", 0),
+        },
+    )
     return IngestResponse(
         status="ok",
         documents=result.get("documents", 0),
@@ -73,18 +136,41 @@ async def ingest(req: IngestRequest):
     )
 
 
+@router.get("/ingest/progress")
+async def ingest_progress_endpoint():
+    return ingest_progress.snapshot()
+
+
+@router.post("/ingest/cancel")
+async def ingest_cancel(req: Optional[IngestCancelRequest] = None):
+    snap = ingest_progress.snapshot()
+    logger.info(
+        "cancel requested: run_id=%s current_started_at=%s running=%s",
+        None if req is None else req.run_id,
+        snap.get("started_at"),
+        snap.get("running"),
+    )
+    if snap.get("running") and not ingest_progress.is_current_run(
+        None if req is None else req.run_id, snap
+    ):
+        logger.warning("cancel ignored for stale run_id=%s", None if req is None else req.run_id)
+        return {**snap, "ignored_stale_cancel": True}
+    ingest_progress.cancel()
+    return snap
+
+
 @router.get("/status", response_model=StatusResponse)
 async def status():
     client = get_client()
     info = collection_info(client)
     if info is None:
         return StatusResponse(
-            collection=settings.qdrant_collection,
+            collection=display_name(settings.qdrant_collection),
             points_count=None,
             status="not_found",
         )
     return StatusResponse(
-        collection=info["name"],
+        collection=display_name(info["name"]),
         points_count=info["points_count"],
         status=str(info["status"]),
     )
@@ -177,8 +263,8 @@ async def file_content(rel: str):
 @router.get("/collections", response_model=CollectionsResponse)
 async def collections():
     return CollectionsResponse(
-        current=settings.qdrant_collection,
-        collections=list_collections(get_client()),
+        current=display_name(settings.qdrant_collection),
+        collections=[display_name(c) for c in list_collections(get_client())],
     )
 
 
@@ -189,15 +275,50 @@ async def switch_collection(req: CollectionSwitchRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CollectionsResponse(
-        current=settings.qdrant_collection,
-        collections=list_collections(get_client()),
+        current=display_name(settings.qdrant_collection),
+        collections=[display_name(c) for c in list_collections(get_client())],
+    )
+
+
+@router.post("/collections/rename", response_model=CollectionsResponse)
+async def rename_collection(req: CollectionRenameRequest):
+    try:
+        rename_display(req.name, req.new_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return CollectionsResponse(
+        current=display_name(settings.qdrant_collection),
+        collections=[display_name(c) for c in list_collections(get_client())],
+    )
+
+
+@router.post("/collections/delete", response_model=CollectionsResponse)
+async def remove_collection(req: CollectionSwitchRequest):
+    client = get_client()
+    storage = storage_for_display(req.name)
+    existing = list_collections(client)
+    if storage not in existing:
+        raise HTTPException(status_code=404, detail="集合不存在")
+    if len(existing) <= 1:
+        raise HTTPException(status_code=400, detail="至少保留一个集合")
+    delete_alias(storage)
+    delete_collection_sessions(storage)
+    delete_collection(client, storage)
+    if settings.qdrant_collection == storage:
+        settings.qdrant_collection = next(c for c in existing if c != storage)
+    return CollectionsResponse(
+        current=display_name(settings.qdrant_collection),
+        collections=[display_name(c) for c in list_collections(client)],
     )
 
 
 @router.get("/imports", response_model=ImportListResponse)
-async def list_imports(q: Optional[str] = None, limit: int = 100):
-    sessions = list_sessions(q=q, limit=limit, collection=settings.qdrant_collection)
-    stats = collection_session_stats(settings.qdrant_collection)
+async def list_imports(
+    q: Optional[str] = None, limit: int = 100, collection: Optional[str] = None
+):
+    collection = storage_for_display(collection) if collection else settings.qdrant_collection
+    sessions = list_sessions(q=q, limit=limit, collection=collection)
+    stats = collection_session_stats(collection)
 
     live = None
     newest_id = max(stats) if stats else None

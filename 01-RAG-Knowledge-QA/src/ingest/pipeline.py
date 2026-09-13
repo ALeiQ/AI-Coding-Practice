@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import pathlib
 import time
+import traceback
 import uuid
+from typing import Callable
 
 from src.config import settings
 from src.imports.store import add_files, add_session, latest_md5_by_rel_path, prune_files
+from src.ingest import progress as ingest_progress
 from src.ingest.chunker import split_documents
 from src.ingest.loader import SUPPORTED_EXTENSIONS, load_directory, load_file
 from src.vectorstore.embedder import get_dense_embeddings, get_sparse_embeddings
@@ -120,10 +123,16 @@ def _deleted_sources(
 
 
 def ingest_paths(
-    paths: list[str], recreate: bool = False, delete_missing: bool = True
+    paths: list[str],
+    recreate: bool = False,
+    delete_missing: bool = True,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> dict:
     started = time.monotonic()
     client = get_client()
+
+    if progress:
+        progress("read", 0, 0)
 
     existing = (
         {}
@@ -138,11 +147,16 @@ def ingest_paths(
     entries = _collect_docs(paths)
     current_sources = {e["source"] for e in entries}
 
+    if progress:
+        progress("chunk", 0, 0)
+
     deleted = []
     if delete_missing and existing and not recreate:
         deleted = _deleted_sources(existing, current_sources, paths)
 
     if not entries:
+        if progress:
+            progress("done", 0, 0)
         files = []
         for src in deleted:
             delete_by_source(client, src)
@@ -186,6 +200,8 @@ def ingest_paths(
             "No supported documents found",
             started,
         )
+        if progress:
+            progress("done", 0, 0)
         return {"error": "No supported documents found", "documents": 0, "chunks": 0}
 
     to_process = [e for e in entries if recreate or existing_md5.get(e["source"]) != e["md5"]]
@@ -201,35 +217,64 @@ def ingest_paths(
         if recreate or chunks:
             for e in to_process:
                 delete_by_source(client, e["source"])
+            dense_cb = None
+            sparse_cb = None
+            if progress:
+                embed_total = len(texts) * 2
+                progress("embed", 0, embed_total)
+
+                def dense_cb(n: int) -> None:
+                    progress("embed", n, embed_total)
+
+                def sparse_cb(n: int) -> None:
+                    progress("embed", len(texts) + n, embed_total)
+
             dense_embeddings = get_dense_embeddings()
-            dense_vecs = (
-                dense_embeddings.embed_documents(texts) if texts else []
-            )
+            dense_vecs = []
+            if texts:
+                if dense_cb:
+                    dense_vecs = dense_embeddings.embed_documents(texts, progress=dense_cb)
+                else:
+                    dense_vecs = dense_embeddings.embed_documents(texts)
             sparse_vecs = []
             if texts:
                 try:
                     sparse_embeddings = get_sparse_embeddings()
-                    sparse_results = sparse_embeddings.embed_documents(texts)
+                    if sparse_cb:
+                        sparse_results = sparse_embeddings.embed_documents(
+                            texts, progress=sparse_cb
+                        )
+                    else:
+                        sparse_results = sparse_embeddings.embed_documents(texts)
                     sparse_vecs = [
                         {"indices": s.indices, "values": s.values} for s in sparse_results
                     ]
                 except Exception:
+                    if ingest_progress.is_cancelled():
+                        raise
                     pass
             ensure_collection(client, recreate=False)
             for meta in metadatas:
                 meta["rel_path"] = meta.get("source")
+            if progress:
+                progress("upsert", 0, 0)
             add_documents(client, texts, metadatas, ids, dense_vecs, sparse_vecs)
     except Exception as e:
+        traceback.print_exc()
+        cancelled = ingest_progress.is_cancelled() or "cancelled" in str(e)
+        phase = "cancelled" if cancelled else "error"
         _record_session(
             ", ".join(paths),
             recreate,
             len(entries),
             0,
-            "error",
-            str(e),
+            phase,
+            "cancelled" if cancelled else str(e),
             started,
         )
-        return {"error": str(e), "documents": len(entries), "chunks": 0}
+        if progress:
+            progress("done", 0, 0)
+        return {"error": phase, "documents": len(entries), "chunks": 0}
 
     files = []
     added = updated = unchanged_count = 0
@@ -288,6 +333,9 @@ def ingest_paths(
         chunk_overlap=settings.chunk_overlap,
     )
     add_files(session_id, files)
+
+    if progress:
+        progress("done", 1, 1)
 
     return {
         "documents": len(entries),

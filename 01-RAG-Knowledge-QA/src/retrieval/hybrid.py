@@ -39,15 +39,18 @@ def _build_metadata_filter(keywords: list[str]) -> dict | None:
     return Filter(must=conditions)
 
 
-def search(query: str, top_k: int | None = None) -> list[RetrievedChunk]:
+def search(
+    query: str, top_k: int | None = None, collection_name: str | None = None
+) -> list[RetrievedChunk]:
     top_k = top_k or settings.top_k
+    collection = collection_name or settings.qdrant_collection
     client = get_client()
 
     dense_embeddings = get_dense_embeddings()
     query_dense = dense_embeddings.embed_query(query)
 
     dense_results = client.query_points(
-        collection_name=settings.qdrant_collection,
+        collection_name=collection,
         query=query_dense,
         using="dense",
         with_payload=True,
@@ -80,7 +83,7 @@ def search(query: str, top_k: int | None = None) -> list[RetrievedChunk]:
             keyword_filter = Filter(should=should_conditions)
 
             keyword_results = client.query_points(
-                collection_name=settings.qdrant_collection,
+                collection_name=collection,
                 query=query_dense,
                 using="dense",
                 query_filter=keyword_filter,

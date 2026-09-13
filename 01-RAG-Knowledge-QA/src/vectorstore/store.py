@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, VectorParams
 
 from src.config import settings
+from src.vectorstore.naming import register_alias, storage_name
 
 _client: QdrantClient | None = None
 
@@ -24,9 +24,6 @@ def get_client() -> QdrantClient:
     return _client
 
 
-_VALID_COLLECTION = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
 def list_collections(client: QdrantClient) -> list[str]:
     try:
         return sorted(c.name for c in client.get_collections().collections)
@@ -34,13 +31,21 @@ def list_collections(client: QdrantClient) -> list[str]:
         return []
 
 
+def delete_collection(client: QdrantClient, name: str) -> None:
+    client.delete_collection(name)
+
+
 def set_active_collection(client: QdrantClient, name: str) -> None:
-    """Switch the active collection at runtime (in-memory, resets on restart)."""
-    if not name or not _VALID_COLLECTION.match(name):
-        raise ValueError(
-            "Collection name may only contain letters, digits, '-' and '_'"
-        )
-    settings.qdrant_collection = name
+    """Switch the active collection at runtime (in-memory, resets on restart).
+
+    Non-ASCII display names are mapped to a Qdrant-legal storage name; the
+    display name persists via the name alias file.
+    """
+    if not name or not name.strip():
+        raise ValueError("Collection name must not be empty")
+    storage = storage_name(name)
+    register_alias(name, storage)
+    settings.qdrant_collection = storage
     ensure_collection(client, recreate=False)
 
 

@@ -10,6 +10,7 @@ from src.config import settings
 class QueryRequest(BaseModel):
     question: str
     top_k: int = Field(default_factory=lambda: settings.top_k)
+    collection: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -39,6 +40,10 @@ class IngestResponse(BaseModel):
 class IngestErrorResponse(BaseModel):
     status: str
     error: str
+
+
+class IngestCancelRequest(BaseModel):
+    run_id: Optional[float] = None
 
 
 class StatusResponse(BaseModel):
@@ -99,6 +104,11 @@ class ImportListResponse(BaseModel):
 
 class CollectionSwitchRequest(BaseModel):
     name: str
+
+
+class CollectionRenameRequest(BaseModel):
+    name: str
+    new_name: str
 
 
 class CollectionsResponse(BaseModel):

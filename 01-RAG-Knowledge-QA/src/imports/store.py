@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 from src.config import settings
+
+_LOCK = threading.Lock()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -42,15 +47,26 @@ CREATE INDEX IF NOT EXISTS idx_files_session ON files(session_id);
 def _connect() -> sqlite3.Connection:
     path = Path(settings.import_db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
+@contextmanager
+def _connection() -> Iterator[sqlite3.Connection]:
+    with _LOCK:
+        conn = _connect()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+
 def init_db() -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.executescript(_SCHEMA)
         _migrate_sessions_collection(conn)
 
@@ -86,7 +102,7 @@ def add_session(
 ) -> int:
     init_db()
     collection = collection or settings.qdrant_collection
-    with _connect() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             """
             INSERT INTO sessions (
@@ -114,7 +130,7 @@ def add_session(
 
 def add_files(session_id: int, files: list[dict]) -> None:
     init_db()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.executemany(
             """
             INSERT INTO files (
@@ -149,7 +165,7 @@ def list_sessions(
     if q:
         where += " AND path LIKE ?"
         params.append(f"%{q}%")
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             f"""
             SELECT * FROM sessions
@@ -162,16 +178,29 @@ def list_sessions(
         return [dict(r) for r in rows]
 
 
+def delete_collection_sessions(collection: str) -> int:
+    """Delete every import record for a collection; returns rows removed."""
+    init_db()
+    with _connection() as conn:
+        conn.execute(
+            "DELETE FROM files WHERE session_id IN (SELECT id FROM sessions WHERE collection = ?)",
+            (collection,),
+        )
+        cur = conn.execute("DELETE FROM sessions WHERE collection = ?", (collection,))
+        conn.commit()
+        return cur.rowcount
+
+
 def get_session(session_id: int) -> dict | None:
     init_db()
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row) if row else None
 
 
 def list_files(session_id: int) -> list[dict]:
     init_db()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             "SELECT * FROM files WHERE session_id = ? ORDER BY id", (session_id,)
         ).fetchall()
@@ -181,7 +210,7 @@ def list_files(session_id: int) -> list[dict]:
 def latest_md5_by_filename() -> dict[str, dict]:
     """Return {filename: {md5, status, session_id}} from the newest session of each file."""
     init_db()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT f.filename, f.file_md5, f.status, f.session_id
@@ -201,7 +230,7 @@ def latest_md5_by_rel_path(collection: str | None = None) -> dict[str, dict]:
     row per rel_path within the given (or active) collection."""
     init_db()
     collection = collection or settings.qdrant_collection
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT f.rel_path, f.file_md5, f.status, f.filename, f.chunk_count
@@ -227,7 +256,7 @@ def prune_files(collection: str | None, keep_sources: set[str]) -> int:
     vector collection so stale md5 guesses don't skip later imports."""
     init_db()
     collection = collection or settings.qdrant_collection
-    with _connect() as conn:
+    with _connection() as conn:
         if not keep_sources:
             cur = conn.execute(
                 """
@@ -257,7 +286,7 @@ def collection_session_stats(collection: str | None = None) -> dict[int, dict]:
     excluded from totals. Sessions without files carry the prior snapshot."""
     init_db()
     collection = collection or settings.qdrant_collection
-    with _connect() as conn:
+    with _connection() as conn:
         session_ids = [
             r["id"]
             for r in conn.execute(
@@ -305,7 +334,7 @@ def session_snapshot(
     """Snapshot of indexed files in the collection as of the end of session_id."""
     init_db()
     collection = collection or settings.qdrant_collection
-    with _connect() as conn:
+    with _connection() as conn:
         target_sid = int(session_id)
         rows = conn.execute(
             """
