@@ -679,7 +679,6 @@ function app() {
         chatCollOpenFor: null,
         editChatId: null,
         editChatName: '',
-        loading: false,
 
         ingestRecreate: false,
         ingestDeleteMissing: true,
@@ -788,6 +787,10 @@ function app() {
                 || { id: null, title: '会话', collection: '', messages: [] };
         },
 
+        get loading() {
+            return !!(this.activeSession() && this.activeSession().busy);
+        },
+
         dirDotStyle(row) {
             if (!row.isDir || row.total <= 0 || row.imported === 0 || row.imported >= row.total) return '';
             const pct = Math.min(row.imported / row.total, 1);
@@ -837,6 +840,7 @@ function app() {
                 this.activeChatId = this.chatSessions[0].id;
             }
             for (const s of this.chatSessions) {
+                s.busy = false;
                 if (!s.collection || (this.collections.length && !this.collections.includes(s.collection))) {
                     s.collection = this.currentCollection || '';
                 }
@@ -1024,13 +1028,13 @@ function app() {
         },
 
         async sendQuery() {
-            const q = this.question.trim();
-            if (!q || this.loading) return;
-
             const sess = this.activeSession();
+            const q = this.question.trim();
+            if (!q || sess.busy) return;
+
             sess.messages.push({ role: 'user', content: q });
             this.question = '';
-            this.loading = true;
+            sess.busy = true;
 
             sess.messages.push({ role: 'assistant', content: '', sources: [], retrieved: [], question: q });
             const idx = sess.messages.length - 1;
@@ -1078,7 +1082,7 @@ function app() {
                 sess.messages[idx].content = '请求失败: ' + e.message;
             }
 
-            this.loading = false;
+            sess.busy = false;
             this.saveChatSessions();
             this.scrollChatBottom();
         },
