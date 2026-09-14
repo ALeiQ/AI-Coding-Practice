@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from qdrant_client import QdrantClient
@@ -9,6 +10,7 @@ from src.config import settings
 from src.vectorstore.naming import register_alias, storage_name
 
 _client: QdrantClient | None = None
+_write_lock = threading.RLock()
 
 
 def get_client() -> QdrantClient:
@@ -16,11 +18,11 @@ def get_client() -> QdrantClient:
     if _client is None:
         url = settings.qdrant_url
         if url == ":memory:" or url == "":
-            _client = QdrantClient(":memory:")
+            _client = QdrantClient(":memory:", force_disable_check_same_thread=True)
         elif url.startswith("http"):
             _client = QdrantClient(url=url)
         else:
-            _client = QdrantClient(path=url)
+            _client = QdrantClient(path=url, force_disable_check_same_thread=True)
     return _client
 
 
@@ -32,7 +34,8 @@ def list_collections(client: QdrantClient) -> list[str]:
 
 
 def delete_collection(client: QdrantClient, name: str) -> None:
-    client.delete_collection(name)
+    with _write_lock:
+        client.delete_collection(name)
 
 
 def set_active_collection(client: QdrantClient, name: str) -> None:
@@ -43,13 +46,19 @@ def set_active_collection(client: QdrantClient, name: str) -> None:
     """
     if not name or not name.strip():
         raise ValueError("Collection name must not be empty")
-    storage = storage_name(name)
-    register_alias(name, storage)
-    settings.qdrant_collection = storage
-    ensure_collection(client, recreate=False)
+    with _write_lock:
+        storage = storage_name(name)
+        register_alias(name, storage)
+        settings.qdrant_collection = storage
+        ensure_collection(client, recreate=False)
 
 
 def ensure_collection(client: QdrantClient, recreate: bool = False) -> None:
+    with _write_lock:
+        ensure_collection_unlocked(client, recreate)
+
+
+def ensure_collection_unlocked(client: QdrantClient, recreate: bool = False) -> None:
     name = settings.qdrant_collection
     if client.collection_exists(name):
         if recreate:
@@ -99,10 +108,11 @@ def add_documents(
             )
         )
 
-    client.upsert(
-        collection_name=settings.qdrant_collection,
-        points=points,
-    )
+    with _write_lock:
+        client.upsert(
+            collection_name=settings.qdrant_collection,
+            points=points,
+        )
 
 
 def collection_info(client: QdrantClient) -> dict | None:
@@ -188,15 +198,16 @@ def delete_by_source(client: QdrantClient, source: str) -> int:
     )
     if not points:
         return 0
-    client.delete(
-        collection_name=settings.qdrant_collection,
-        points_selector=Filter(
-            must=[
-                FieldCondition(
-                    key="metadata.source",
-                    match=MatchValue(value=source),
-                )
-            ]
-        ),
-    )
+    with _write_lock:
+        client.delete(
+            collection_name=settings.qdrant_collection,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="metadata.source",
+                        match=MatchValue(value=source),
+                    )
+                ]
+            ),
+        )
     return len(points)
