@@ -1,0 +1,27 @@
+[submodule "01-RAG-Knowledge-QA"]
+	path = 01-RAG-Knowledge-QA
+	url = git@github.com:ALeiQ/01-RAG-Knowledge-QA.git
+[submodule "02-Function-Calling-Agent"]
+	path = 02-Function-Calling-Agent
+	url = git@github.com:ALeiQ/02-Function-Calling-Agent.git
+[submodule "03-SQL-to-NL"]
+	path = 03-SQL-to-NL
+	url = git@github.com:ALeiQ/03-SQL-to-NL.git
+[submodule "04-Multi-Agent-Collaboration"]
+	path = 04-Multi-Agent-Collaboration
+	url = git@github.com:ALeiQ/04-Multi-Agent-Collaboration.git
+[submodule "05-ReAct-Agent-Memory"]
+	path = 05-ReAct-Agent-Memory
+	url = git@github.com:ALeiQ/05-ReAct-Agent-Memory.git
+[submodule "06-Auto-Test-Generator"]
+	path = 06-Auto-Test-Generator
+	url = git@github.com:ALeiQ/06-Auto-Test-Generator.git
+[submodule "07-Handwritten-RAG-Framework"]
+	path = 07-Handwritten-RAG-Framework
+	url = git@github.com:ALeiQ/07-Handwritten-RAG-Framework.git
+[submodule "08-LoRA-Finetuning"]
+	path = 08-LoRA-Finetuning
+	url = git@github.com:ALeiQ/08-LoRA-Finetuning.git
+[submodule "09-Inference-Cache"]
+	path = 09-Inference-Cache
+	url = git@github.com:ALeiQ/09-Inference-Cache.git
