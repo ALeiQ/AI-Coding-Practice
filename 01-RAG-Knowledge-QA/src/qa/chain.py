@@ -20,15 +20,23 @@ SYSTEM_PROMPT = """你是一个知识库问答助手。基于以下检索到的�
 OLLAMA_BASE = settings.ollama_base_url
 
 
+MAX_CONTEXT_CHARS = 4000
+
+
 def _build_context(chunks: list[RetrievedChunk]) -> tuple[list[str], str]:
     context_parts = []
     sources = []
-    for i, chunk in enumerate(chunks, 1):
+    budget = MAX_CONTEXT_CHARS
+    for chunk in chunks:
         filename = chunk.metadata.get("filename", "unknown")
         page = chunk.metadata.get("page")
         loc = f"{filename}" + (f" (page {page})" if page else "")
-        context_parts.append(f"[{i}] ({loc})\n{chunk.text}")
+        part = f"[{len(context_parts) + 1}] ({loc})\n{chunk.text}"
+        if budget <= 0:
+            break
+        context_parts.append(part)
         sources.append(loc)
+        budget -= len(part)
     return sources, "\n\n".join(context_parts)
 
 
@@ -83,7 +91,7 @@ def answer_question(
     return {
         "answer": data["message"]["content"],
         "sources": sources,
-        "chunks_used": len(chunks),
+        "chunks_used": len(sources),
         "retrieved": _chunk_details(chunks),
     }
 
@@ -129,6 +137,6 @@ def answer_question_stream(
         "type": "done",
         "answer": full_answer,
         "sources": sources,
-        "chunks_used": len(chunks),
+        "chunks_used": len(sources),
         "retrieved": _chunk_details(chunks),
     }

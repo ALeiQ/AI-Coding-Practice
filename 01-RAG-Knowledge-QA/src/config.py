@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 75
 
     top_k: int = 20
+    chunks_per_file: int = 3
     rerank_top_k: int = 5
     rrf_k: int = 60
 
