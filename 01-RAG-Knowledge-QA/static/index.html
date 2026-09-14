@@ -47,9 +47,9 @@
                 :value="configInfo.llm_model"
                 @change="switchModel($event.target.value)"
                 :disabled="modelBusy"
-                class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs max-w-[200px]">
+                class="header-model bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs max-w-[200px]">
                 <template x-for="m in llmModels" :key="m.name">
-                    <option :value="m.name" x-text="m.name"></option>
+                    <option :value="m.name" :selected="m.name === configInfo.llm_model" x-text="m.name"></option>
                 </template>
             </select>
             <span x-show="llmModels.length === 0" class="badge-dim" x-text="configInfo.llm_model ? configInfo.llm_model + ' (加载模型列表…)' : '加载中…'"></span>
@@ -58,11 +58,16 @@
     </header>
 
     <!-- Tab Bar -->
-    <div class="glass-header px-6 flex gap-1 shrink-0">
-        <template x-for="tab in ['chat', 'ingest', 'manage', 'status', 'imports']" :key="tab">
+    <div class="glass-header px-6 flex gap-1 shrink-0 select-none">
+        <template x-for="tab in tabs" :key="tab">
             <button
+                draggable="true"
                 @click="setActiveTab(tab)"
-                :class="activeTab === tab ? 'tab-btn tab-on text-white' : 'tab-btn text-gray-400 hover:text-gray-200 hover:bg-white/5'"
+                @dragstart="dragStartTab(tab, $event)"
+                @dragover.prevent="dragOverTab(tab)"
+                @drop.prevent="dragEndTab()"
+                @dragend="dragEndTab()"
+                :class="(activeTab === tab ? 'tab-btn tab-on text-white' : 'tab-btn text-gray-400 hover:text-gray-200 hover:bg-white/5') + (dragTabId === tab ? ' opacity-40 cursor-grabbing' : ' cursor-grab')"
                 class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
                 x-text="tab === 'chat' ? '💬 对话' : tab === 'ingest' ? '📥 导入' : tab === 'manage' ? '📖 知识库管理' : tab === 'imports' ? '📚 导入记录' : '📊 状态'"
             ></button>
@@ -77,7 +82,13 @@
             </div>
             <div class="flex-1 overflow-y-auto p-2 space-y-1.5">
                 <template x-for="s in chatSessions" :key="s.id">
-                    <div @click="switchChat(s.id)" :class="s.id === activeChatId ? 'session-item session-active' : 'session-item'">
+                    <div draggable="true"
+                        @click="switchChat(s.id)"
+                        @dragstart="dragStartSession(s.id, $event)"
+                        @dragover.prevent="dragOverSession(s.id)"
+                        @drop.prevent="dragEndSession()"
+                        @dragend="dragEndSession()"
+                        :class="(s.id === activeChatId ? 'session-item session-active' : 'session-item') + (dragSessionId === s.id ? ' opacity-40 cursor-grabbing' : ' cursor-grab')">
                         <div class="flex items-center gap-1">
                             <input x-show="editChatId === s.id"
                                 x-model="editChatName"
@@ -659,6 +670,16 @@ function app() {
             { id: 'light', name: '明亮', grad: 'linear-gradient(135deg,#0f172a 35%,#f8fafc 90%)' },
         ],
         activeTab: ['chat', 'ingest', 'manage', 'status', 'imports'].includes(savedTab) ? savedTab : 'chat',
+        tabs: (() => {
+            const def = ['chat', 'ingest', 'manage', 'status', 'imports'];
+            try {
+                const saved = JSON.parse(localStorage.getItem('ragTabOrder') || '[]');
+                if (Array.isArray(saved) && saved.length === def.length && def.every((t) => saved.includes(t))) return saved;
+            } catch (e) {}
+            return def;
+        })(),
+        dragTabId: null,
+        dragSessionId: null,
         question: '',
         chatSessions: (() => {
             try {
@@ -779,6 +800,46 @@ function app() {
             sessionStorage.setItem('ragTab', tab);
             this.activeTab = tab;
             if (tab === 'imports') this.loadImports();
+        },
+
+        reorderArray(arr, fromVal, toVal, keyFn) {
+            const fi = arr.findIndex((x) => keyFn(x) === fromVal);
+            const ti = arr.findIndex((x) => keyFn(x) === toVal);
+            if (fi < 0 || ti < 0 || fi === ti) return null;
+            const next = arr.slice();
+            const [item] = next.splice(fi, 1);
+            next.splice(next.findIndex((x) => keyFn(x) === toVal), 0, item);
+            return next;
+        },
+        dragStartTab(tab, ev) {
+            this.dragTabId = tab;
+            if (ev.dataTransfer) {
+                ev.dataTransfer.effectAllowed = 'move';
+                ev.dataTransfer.setData('text/plain', tab);
+            }
+        },
+        dragEndTab() { this.dragTabId = null; },
+        dragOverTab(target) {
+            if (!this.dragTabId || this.dragTabId === target) return;
+            const next = this.reorderArray(this.tabs, this.dragTabId, target, (t) => t);
+            if (!next) return;
+            this.tabs = next;
+            try { localStorage.setItem('ragTabOrder', JSON.stringify(next)); } catch (e) {}
+        },
+        dragStartSession(id, ev) {
+            this.dragSessionId = id;
+            if (ev.dataTransfer) {
+                ev.dataTransfer.effectAllowed = 'move';
+                ev.dataTransfer.setData('text/plain', String(id));
+            }
+        },
+        dragEndSession() { this.dragSessionId = null; },
+        dragOverSession(target) {
+            if (!this.dragSessionId || this.dragSessionId === target) return;
+            const next = this.reorderArray(this.chatSessions, this.dragSessionId, target, (s) => s.id);
+            if (!next) return;
+            this.chatSessions = next;
+            this.saveChatSessions();
         },
 
         activeSession() {

@@ -648,3 +648,16 @@ html[data-theme="light"] .session-item.session-active {
 html[data-theme="light"] .session-item.session-active:hover {
     background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
 }
+/* 明亮主题：右上角模型下拉（恢复浅底深字，避免黑字压深底看不清） */
+html[data-theme="light"] .header-model {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: rgba(15, 23, 42, 0.22) !important;
+}
+html[data-theme="light"] .header-model option {
+    background: #ffffff;
+    color: #0f172a;
+}
+html[data-theme="light"] .header-model:disabled {
+    opacity: 0.6;
+}
