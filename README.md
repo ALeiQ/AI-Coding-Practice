@@ -46,6 +46,51 @@ A collection of hands-on AI coding projects, covering RAG, agents, SQL, fine-tun
 | 08 | [LoRA-Finetuning](08-LoRA-Finetuning/) | LoRA parameter-efficient fine-tuning |
 | 09 | [Inference-Cache](09-Inference-Cache/) | LLM inference caching and optimization |
 
+## Repository Structure
+
+本仓库是**子模块(monorepo + git submodule)组织**:每个课题都是独立的 git 仓库,各自维护版本与提交,父仓库只记录各子模块的 commit 指针。
+
+| # | 独立仓库 |
+|---|----------|
+| 01 | `ALeiQ/01-RAG-Knowledge-QA` |
+| 02 | `ALeiQ/02-Function-Calling-Agent` |
+| 03 | `ALeiQ/03-SQL-to-NL` |
+| 04 | `ALeiQ/04-Multi-Agent-Collaboration` |
+| 05 | `ALeiQ/05-ReAct-Agent-Memory` |
+| 06 | `ALeiQ/06-Auto-Test-Generator` |
+| 07 | `ALeiQ/07-Handwritten-RAG-Framework` |
+| 08 | `ALeiQ/08-LoRA-Finetuning` |
+| 09 | `ALeiQ/09-Inference-Cache` |
+
+### 克隆方式
+
+```bash
+git clone --recurse-submodules git@github.com:ALeiQ/AI-Coding-Practice.git
+```
+
+### 日常使用
+
+在某个课题目录下开发,提交并推送到**它自己的仓库**:
+
+```bash
+cd 01-RAG-Knowledge-QA
+# ...开发...
+git add -A && git commit -m "..." && git push
+```
+
+若需在父仓库记录该课题的最新 commit 指针:
+
+```bash
+cd ..                          # 回到父仓库
+git add 01-RAG-Knowledge-QA && git commit -m "chore: bump 01 submodule" && git push
+```
+
+拉取更新(父仓库 + 所有子模块):
+
+```bash
+git pull --recurse-submodules && git submodule update --remote --merge
+```
+
 ## Tech Stack
 
 - **Python 3.9+**
